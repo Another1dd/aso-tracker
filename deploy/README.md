@@ -39,3 +39,24 @@ Notes:
 - Runs via `zsh -lc` so nvm/brew node is on PATH.
 - iTunes rate-limits by IP; once a day from one machine is safe.
 - To add locales/keywords later, edit them in the UI (writes config), no plist change needed.
+
+## Keep the UI running in the background (optional)
+
+Runs `dev:core` (LAN-exposed on :5173) as a launchd agent so it survives logout/reboot
+and doesn't tie up a terminal. Access from another machine at `http://<mac-lan-ip>:5173`.
+
+```sh
+REPO="$(pwd)"
+sed "s|__REPO__|$REPO|g" deploy/com.chepatapa.aso-ui.plist \
+  > ~/Library/LaunchAgents/com.chepatapa.aso-ui.plist
+
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.chepatapa.aso-ui.plist
+launchctl list | grep aso-ui
+tail -f deploy/aso-ui.log   # wait for the vite "ready" lines
+```
+
+Stop / restart:
+```sh
+launchctl bootout gui/$(id -u)/com.chepatapa.aso-ui
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.chepatapa.aso-ui.plist
+```

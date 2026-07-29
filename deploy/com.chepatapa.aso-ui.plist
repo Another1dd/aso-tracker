@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.chepatapa.aso-ui</string>
+
+    <!-- Keeps the ASO Studio UI (dev:core, LAN-exposed on :5173) running in the
+         background. Login shell so nvm/brew node is on PATH.
+         Replace __REPO__ with the absolute path to the aso-tracker checkout. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd __REPO__ &amp;&amp; exec npm run dev:core</string>
+    </array>
+
+    <!-- Start at load and restart if it ever exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__REPO__/deploy/aso-ui.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO__/deploy/aso-ui.log</string>
+</dict>
+</plist>
