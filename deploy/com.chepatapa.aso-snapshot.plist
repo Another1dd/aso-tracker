@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.chepatapa.aso-snapshot</string>
+
+    <!-- Runs the daily snapshot script via a login shell so nvm/brew node is on PATH.
+         Replace __REPO__ with the absolute path to the aso-tracker checkout. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>__REPO__/deploy/snapshot-daily.sh</string>
+    </array>
+
+    <!-- Every day at 09:00 local time. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__REPO__/deploy/aso-snapshot.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO__/deploy/aso-snapshot.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
