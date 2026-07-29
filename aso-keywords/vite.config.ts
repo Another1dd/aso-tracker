@@ -109,6 +109,7 @@ const ASA_API: StudioTarget = { label: 'ASA Ads API', port: 5194 };
 export default defineConfig({
   plugins: [react(), subpathRedirect],
   server: {
+    host: true, // bind 0.0.0.0 so the unified 5173 origin is reachable over LAN
     proxy: {
       '/api': {
         target: 'http://localhost:5174',

@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n keywords,screenshots,video,asa,inapp -c magenta,cyan,green,yellow,blue \"npm:dev:keywords\" \"npm:dev:screenshots\" \"npm:dev:video\" \"npm:dev:asa\" \"npm:dev:inapp\"",
+    "dev:core": "concurrently -n keywords,screenshots,video,inapp -c magenta,cyan,green,blue \"npm:dev:keywords\" \"npm:dev:screenshots\" \"npm:dev:video\" \"npm:dev:inapp\"",
     "dev:keywords": "npm --workspace aso-keywords run dev",
     "dev:screenshots": "npm --workspace aso-screenshots run dev",
     "dev:video": "npm --workspace aso-video run dev",
