@@ -65,6 +65,29 @@ async function popularityOf(base: string, appId: number, terms: string[]): Promi
   throw new Error('popularity did not finish in time');
 }
 
+interface DemandItem { term: string; popularity: number | null; band: string; confidence: string; note: string; depth: { status: string; chars?: number } }
+
+/** Popularity plus autocomplete depth for terms; the server queues the probes, so poll until nothing is pending. */
+async function demandFor(base: string, appId: string, storefront: string, terms: string[]): Promise<Map<string, DemandItem>> {
+  const out = new Map<string, DemandItem>();
+  const deadline = Date.now() + 25 * 60_000;
+  while (terms.length && Date.now() < deadline) {
+    const response = await fetch(`${base}/api/apps/${appId}/demand`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storefront, terms, wait_ms: 45_000 }),
+    });
+    if (!response.ok) throw new Error(`demand ${response.status}`);
+    const data = await response.json() as { items: DemandItem[]; pending: number };
+    for (const item of data.items) out.set(item.term, item);
+    if (data.pending === 0) break;
+  }
+  return out;
+}
+
+const BAND_ORDER = ['A', 'B', 'C', 'D', 'unknown'];
+const bandText = (item: DemandItem | undefined) => (item ? `${item.band}${item.depth.status === 'hit' ? ` (${item.depth.chars} симв.${(item.depth as { match?: string }).match === 'extended' ? ', продолжение' : ''})` : ''}` : '—');
+
 const popLabel = (value: number | null | undefined) => (value == null ? 'нет данных' : value <= 5 ? '≤5' : String(value));
 
 function fieldLine(field: Field, text: string) {
@@ -75,7 +98,7 @@ function fieldLine(field: Field, text: string) {
 async function main() {
   const options = args();
   const appId = options.app;
-  if (!appId || !options.metadata) throw new Error('usage: --app=<tool app id> --metadata=<fastlane metadata dir> [--base=http://localhost:5173] [--out=dir]');
+  if (!appId || !options.metadata) throw new Error('usage: --app=<tool app id> --metadata=<fastlane metadata dir> [--base=http://localhost:5173] [--out=dir] [--demand=us,de|none]');
   const base = (options.base ?? 'http://localhost:5173').replace(/\/$/, '');
   const date = new Date().toISOString().slice(0, 10);
   const outDir = resolve(options.out ?? join(homedir(), '.aso-studio', 'keywords', 'audits', appId, date));
@@ -85,6 +108,7 @@ async function main() {
   if (!app) throw new Error(`unknown app ${appId}`);
   const metadata = await readMetadata(resolve(options.metadata));
   const storefronts = app.locales ?? [];
+  const demandStorefronts = new Set((options.demand ?? 'us').split(',').filter((code) => code && code !== 'none'));
 
   const tables = new Map<string, Row[]>();
   for (const code of storefronts) {
@@ -149,14 +173,34 @@ async function main() {
 
     const rows = tables.get(code) ?? [];
     const covered = (keyword: string) => wordsOf(keyword).filter((word) => !seen.has(word) && ![...seen.keys()].some((other) => stem(other) === stem(word)));
-    lines.push('## Отслеживаемые ключи', '', '| Ключ | Наш ранг | Популярность Apple | Сложность | Шанс | Слов нет в metadata | Уверенность |', '|---|---|---|---|---|---|---|');
+    const demand = demandStorefronts.has(code) ? await demandFor(base, appId, code, rows.map((row) => normalize(row.keyword))) : new Map<string, DemandItem>();
+    lines.push('## Отслеживаемые ключи', '', 'Группа спроса: A — значение Apple выше 5 (факт); B, C, D — значение на границе, фраза предлагается в подсказках рано, поздно или никогда (оценка по автоподсказкам, не объём поиска; порог групп предварительный, до проверки).', '');
+    lines.push('| Ключ | Наш ранг | Популярность Apple | Группа спроса | Сложность | Шанс | Слов нет в metadata | Уверенность |', '|---|---|---|---|---|---|---|---|');
     const sorted = [...rows].sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0) || (a.current || 9999) - (b.current || 9999));
     for (const row of sorted) {
       const missing = covered(row.keyword);
       const confidence = row.popularity != null && row.popularity > 5 ? 'высокая (факт)' : row.popularity == null ? 'нет данных' : 'спрос неизвестен: значение на границе';
-      lines.push(`| ${row.keyword} | ${row.current ? `#${row.current}` : 'нет в топе'} | ${row.popularityLabel ?? popLabel(row.popularity)} | ${row.difficulty ?? '—'} | ${row.chance ?? '—'} | ${missing.join(', ') || '—'} | ${confidence} |`);
+      lines.push(`| ${row.keyword} | ${row.current ? `#${row.current}` : 'нет в топе'} | ${row.popularityLabel ?? popLabel(row.popularity)} | ${demandStorefronts.has(code) ? bandText(demand.get(normalize(row.keyword))) : 'не считалась'} | ${row.difficulty ?? '—'} | ${row.chance ?? '—'} | ${missing.join(', ') || '—'} | ${confidence} |`);
     }
     lines.push('', 'Ранг «нет в топе» означает «не найдено в глубине последней проверки», не «не ранжируется». Сложность и шанс пусты, пока не прошёл разбор выдачи.', '');
+
+    if (demandStorefronts.has(code)) {
+      const ideas = await getJson<{ ideas: Array<{ keyword: string; score: number }> }>(`${base}/api/apps/${appId}/suggestions?locale=${code}`);
+      const tracked = new Set(rows.map((row) => normalize(row.keyword)));
+      const options = ideas.ideas
+        .filter((idea) => !tracked.has(normalize(idea.keyword)))
+        .map((idea) => ({ keyword: normalize(idea.keyword), missing: covered(idea.keyword), score: idea.score }))
+        .filter((idea) => idea.missing.length <= 1)
+        .slice(0, 30);
+      const bands = await demandFor(base, appId, code, options.map((idea) => idea.keyword));
+      const ranked = options
+        .map((idea) => ({ ...idea, band: bands.get(idea.keyword), chars: idea.missing.length ? Array.from(idea.missing[0]).length + 1 : 0 }))
+        .sort((a, b) => BAND_ORDER.indexOf(a.band?.band ?? 'unknown') - BAND_ORDER.indexOf(b.band?.band ?? 'unknown') || a.chars - b.chars || b.score - a.score);
+      lines.push('## Кандидаты на замену', '', 'Фразы из генератора идей (с отбором по опорным словам), для которых в metadata не хватает не больше одного слова. Сортировка: группа спроса, затем сколько символов поля ключей нужно (слово плюс запятая). Это гипотезы для теста, не рекомендации.', '');
+      lines.push('| Фраза | Группа спроса | Популярность Apple | Не хватает слова | Символов | Балл идеи |', '|---|---|---|---|---|---|');
+      for (const idea of ranked) lines.push(`| ${idea.keyword} | ${bandText(idea.band)} | ${popLabel(idea.band?.popularity)} | ${idea.missing.join(', ') || '—'} | ${idea.chars} | ${idea.score} |`);
+      lines.push('');
+    }
     await writeFile(join(outDir, `${code}.md`), lines.join('\n') + '\n');
     console.log(`${code}: ${indexed.length} locale(s), ${rows.length} tracked keyword(s), ${wasted} wasted chars`);
   }

@@ -21,6 +21,7 @@ import { keywordRelevance, buildClaudePrompt } from './relevance.js';
 import { keywordSuggestions } from './suggestions.js';
 import { registerCompetitorSpyRoutes } from './competitor-spy.js';
 import { registerCompetitorWatchRoutes, startCompetitorWatch } from './competitor-watch.js';
+import { registerAutocompleteRoutes } from './routes-autocomplete.js';
 import { getAdRepositoryAds, type AdRepositoryDatePreset } from './ad-repository.js';
 import {
   appendMetadataSnapshot,
@@ -259,6 +260,7 @@ app.get('/api/apps/:id/locales', (req, res) => {
 registerCompetitorSpyRoutes(app);
 const competitorWatchDeps = { isBusy: () => snapshotState.running || scheduler.running !== null };
 registerCompetitorWatchRoutes(app, competitorWatchDeps);
+registerAutocompleteRoutes(app);
 app.get('/api/apps/:id/competitors', (req, res) => {
   const limit = Number(req.query.limit) || 20;
   res.json(topCompetitors(req.params.id, limit));

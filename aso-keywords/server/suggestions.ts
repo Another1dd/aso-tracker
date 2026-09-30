@@ -1,6 +1,6 @@
 import { db } from './db.js';
-import { GateHttpError, hostGate, type GatePriority } from './host-gate.js';
-import { storeFrontHeader } from './storefront-ids.js';
+import { alphabetSoup, anchorProblem, anchorRule, cachedHints, fetchHints, type AnchorRule } from './autocomplete.js';
+import type { GatePriority } from './host-gate.js';
 import { loadApps, loadKeywords, type AppConfig } from './config.js';
 import {
   MEDSCAN_KNOWN_BRANDS,
@@ -188,15 +188,17 @@ export function medScanProfile(trackedTokens: Set<string>): RelevanceProfile {
   };
 }
 
-export function genericProfile(trackedTokens: Set<string>): RelevanceProfile {
+export function genericProfile(trackedTokens: Set<string>, anchors?: AnchorRule): RelevanceProfile {
   return {
     id: 'generic',
     knownBrands: new Set(),
     trackedTokens,
     isIntentToken: () => false,
-    intentProblem: (phrase) => tokenize(phrase).some((token) => trackedTokens.has(token) && !MODIFIERS.has(token))
-      ? null
-      : 'нет общих слов с отслеживаемыми ключами',
+    intentProblem: (phrase) => anchors
+      ? anchorProblem(phrase, anchors)
+      : tokenize(phrase).some((token) => trackedTokens.has(token) && !MODIFIERS.has(token))
+        ? null
+        : 'нет общих слов с отслеживаемыми ключами',
     cluster: (phrase) => {
       const head = tokenize(phrase).find((token) => trackedTokens.has(token) && !MODIFIERS.has(token));
       return head ? { id: head, label: head } : { id: 'other', label: 'Другое' };
@@ -332,45 +334,11 @@ export function estimateGain(input: GainInputs): { score: number; level: GainLev
 
 // --- Data sources -----------------------------------------------------------
 
-function decodeXML(value: string) {
-  return value
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
-}
-
-const hintCache = new Map<string, { expiresAt: number; hints: string[] }>();
-
-/** App Store search autocomplete. The `MacSearchAds` client only echoes the
- * seed back; the `Software` client with a storefront header returns the real,
- * popularity-ordered hint list. `null` means the request failed: unknown, not "no hints". */
+/** App Store search autocomplete, popularity-ordered (persisted per day in autocomplete.ts).
+ * `null` means the request failed: unknown, not "no hints". */
 async function appleHints(seed: string, country: string, priority: GatePriority = 'interactive'): Promise<string[] | null> {
-  const key = `${country}:${seed}`;
-  const cached = hintCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.hints;
-  const storefront = storeFrontHeader(country) ?? storeFrontHeader('us')!;
-  const params = new URLSearchParams({ clientApplication: 'Software', term: seed });
-  try {
-    // Hints share the search.itunes.apple.com budget with MZStore rank checks;
-    // they are user-triggered, so they jump the snapshot queue.
-    const xml = await hostGate('search.itunes.apple.com').run(async (via) => {
-      const response = await via.fetch(
-        `https://search.itunes.apple.com/WebObjects/MZSearchHints.woa/wa/hints?${params}`,
-        { headers: { 'X-Apple-Store-Front': storefront }, signal: AbortSignal.timeout(10_000) }
-      );
-      if (!response.ok) throw new GateHttpError(response.status);
-      return response.text();
-    }, { key: `hints|${country}|${seed}`, priority });
-    const hints = Array.from(xml.matchAll(/<key>term<\/key>\s*<string>([\s\S]*?)<\/string>/g))
-      .map((match) => normalized(decodeXML(match[1])))
-      .filter(Boolean);
-    hintCache.set(key, { expiresAt: Date.now() + 6 * 60 * 60_000, hints });
-    return hints;
-  } catch {
-    return null;
-  }
+  const result = await fetchHints(country, seed, { priority, maxAgeMs: 6 * 60 * 60_000 });
+  return result.status === 'ok' ? result.hints : null;
 }
 
 export interface AsaTerm { term: string; demandIndex: number | null; origins: string[] }
@@ -570,7 +538,8 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
   }
   const vocab = buildVocabulary(corpus);
   const trackedTokens = new Set(trackedList.flatMap(tokenize));
-  const baseProfile = isMedScan ? medScanProfile(trackedTokens) : genericProfile(trackedTokens);
+  const anchors = anchorRule(app, country, trackedTokens);
+  const baseProfile = isMedScan ? medScanProfile(trackedTokens) : genericProfile(trackedTokens, anchors);
   // Tracked brand keywords (e.g. «horos») must not make their brand generic.
   const profile: RelevanceProfile = { ...baseProfile, trackedTokens: new Set([...trackedTokens].filter((token) => {
     const kind = classifyToken(token, vocab, { ...baseProfile, trackedTokens: new Set() });
@@ -653,20 +622,32 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
     }))
     .sort((a, b) => (ourRankFor(a) ?? 999) - (ourRankFor(b) ?? 999) || a.length - b.length)
     .slice(0, 12);
-  const hintGroups = await Promise.all(seeds.map((seed) => appleHints(seed, country)));
+  // Configured topic anchors are seeds too; their alphabet-soup lists are used only when already collected.
+  const anchorSeeds = (anchors.anchors ?? []).map((anchor) => normalized(anchor).replace(/\*/g, '')).filter((anchor) => anchor.length >= 3);
+  const plainSeeds = [...new Set([...seeds, ...anchorSeeds])];
+  const hintGroups = await Promise.all(plainSeeds.map((seed) => appleHints(seed, country)));
+  const groups: Array<{ seed: string; hints: string[] | null }> = plainSeeds.map((seed, index) => ({ seed, hints: hintGroups[index] }));
+  for (const seed of anchorSeeds) {
+    for (const prefix of alphabetSoup(seed, country).slice(1)) {
+      const hints = cachedHints(country, prefix);
+      if (hints) groups.push({ seed, hints });
+    }
+  }
   let hintCount = 0;
+  const seedsCounted = new Set<string>();
   const hintErrors = hintGroups.filter((hints) => hints === null).length;
-  hintGroups.forEach((hints, seedIndex) => {
-    const seed = seeds[seedIndex];
+  groups.forEach(({ seed, hints }) => {
     hints?.forEach((hint, index) => {
       hintCount++;
       if (hint === seed) return;
       const candidate = consider(hint);
       if (!candidate) return;
       candidate.sources.add('apple_autocomplete');
+      const counted = seedsCounted.has(`${hint}|${seed}`);
+      seedsCounted.add(`${hint}|${seed}`);
       if (!candidate.autocomplete) candidate.autocomplete = { index, total: hints.length, seed, seeds: 1 };
       else {
-        candidate.autocomplete.seeds++;
+        if (!counted) candidate.autocomplete.seeds++;
         if (index < candidate.autocomplete.index) Object.assign(candidate.autocomplete, { index, total: hints.length, seed });
       }
     });

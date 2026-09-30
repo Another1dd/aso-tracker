@@ -17,6 +17,10 @@ export interface AppConfig {
   version?: string;
   metaCountry?: string;
   metaUpdatedAt?: string;
+  /** Words every relevant search phrase contains, per storefront (`*` = all). A trailing `*` on a word means "starts with". */
+  anchors?: Record<string, string[]>;
+  /** Words that make a phrase off-topic even when an anchor matches. */
+  excludeAnchors?: Record<string, string[]>;
 }
 
 /** App ids are used in a filesystem filename; never let an HTTP route turn
