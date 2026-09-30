@@ -26,6 +26,8 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+asa.env
+*.pem
 .tsbuildinfo
 
 # ===== USER DATA — NEVER COMMIT =====

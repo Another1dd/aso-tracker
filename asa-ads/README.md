@@ -288,7 +288,7 @@ else keep
 
 ## Limitations / wishlist
 
-- No Apple `popularityScore` integration — Apple doesn't expose it via API. Pair with [`aso-keywords`](../aso-keywords) for T/D scores from iTunes Search API.
+- Keyword popularity comes from the Apple Ads Platform API keyword suggestions (`server/keyword-popularity.ts`): one 5–100 value per term, not per storefront, and only for terms Apple returns. There is no lookup for an arbitrary keyword by country.
 - Mutations target only `MANUAL_CPT` campaigns. `MAX_CONVERSIONS` (CPA bidding) is not handled.
 - No multi-org support; assumes one `ASA_ORG_ID` per install.
 - SKAN postbacks not yet visualized — once you have `conversionsCV` in ASA reports, swap CPI for CPA in the dashboard.

@@ -5,14 +5,14 @@
     <key>Label</key>
     <string>com.chepatapa.aso-ui</string>
 
-    <!-- Keeps the ASO Studio UI (dev:core, LAN-exposed on :5173) running in the
+    <!-- Keeps the ASO Studio gateway (npm start, LAN-exposed on :5173) running in the
          background. Login shell so nvm/brew node is on PATH.
          Replace __REPO__ with the absolute path to the aso-tracker checkout. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/zsh</string>
         <string>-lc</string>
-        <string>cd __REPO__ &amp;&amp; exec npm run dev:core</string>
+        <string>exec __REPO__/deploy/aso-ui.sh</string>
     </array>
 
     <!-- Start at load and restart if it ever exits. -->
