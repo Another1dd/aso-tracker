@@ -12,6 +12,7 @@
     "start": "tsx server/index.ts",
     "snapshot": "tsx cli/snapshot.ts",
     "validate-metadata-serps": "tsx cli/validate-metadata-serps.ts",
+    "keyword-audit": "tsx cli/keyword-audit.ts",
     "build-medscan-deploy": "tsx cli/build-medscan-deploy.ts",
     "migrate-jsonl": "tsx cli/migrate-jsonl.ts",
     "lint": "eslint ."
