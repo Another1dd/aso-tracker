@@ -23,22 +23,41 @@ Put the values outside the repo:
 ASA_CLIENT_ID=SEARCHADS.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ASA_TEAM_ID=SEARCHADS.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ASA_KEY_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-ASA_PRIVATE_KEY_PATH=/Users/<you>/.aso-studio/asa-private.pem
-ASA_ORG_ID=00000000
+ASA_PRIVATE_KEY_PATH=$HOME/.aso-studio/asa-private.pem
+ASA_ORG_ID=00000000   # adAccount.orgId from GET /v1/acls; any non-empty value works for popularity
+
+# The Ads module refuses to load without the App Store Connect variables. Popularity does not use
+# them, so placeholders are enough (the key path only has to point at an existing file).
+ASC_KEY_ID=placeholder
+ASC_ISSUER_ID=placeholder
+ASC_VENDOR_NUMBER=0
+ASC_PRIVATE_KEY_PATH=$HOME/.aso-studio/asa-private.pem
+
+# No background Ads traffic sync: only popularity lookups are wanted.
+TRAFFIC_SYNC_ENABLED=false
 ```
 
 Create the key pair and client (Apple Ads → Account Settings → API; an Account Admin has to make the
-user an API user first):
+user an API user first). The key must be PKCS#8 (`BEGIN PRIVATE KEY`); `openssl ecparam -genkey` writes
+SEC1 (`BEGIN EC PRIVATE KEY`) and the tool rejects it with `"pkcs8" must be PKCS#8 formatted string`.
 
 ```sh
-openssl ecparam -genkey -name prime256v1 -noout -out ~/.aso-studio/asa-private.pem
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out ~/.aso-studio/asa-private.pem
 chmod 600 ~/.aso-studio/asa-private.pem
-openssl ec -in ~/.aso-studio/asa-private.pem -pubout -out /tmp/asa-public.pem
+openssl pkey -in ~/.aso-studio/asa-private.pem -pubout -out /tmp/asa-public.pem
 # paste /tmp/asa-public.pem into the API tab, then copy clientId / teamId / keyId
 ```
 
+Already have a SEC1 key? Convert it in place, the public key stays the same:
+`openssl pkcs8 -topk8 -nocrypt -in asa-private.pem -out asa-private.tmp && mv asa-private.tmp asa-private.pem`.
+
 Leave `ASA_MUTATIONS_ENABLED` unset: the Ads product stays read-only. Without this file the studio runs
 fine and popularity just shows as unavailable.
+
+What the values mean (checked against the live API on 2026-09-30): one value per term, the same in every
+storefront (`meditation` returned an identical list in US, DE and IT), on a global 5–100 scale where 5 is
+the floor ("≤5", not zero). Niche or localized long-tail terms mostly sit at the floor, so treat the
+column as "is there any measurable demand", not as a per-country volume.
 
 ## Install (once)
 
