@@ -54,7 +54,7 @@ export interface Projection {
   projected_cpa_paid: number;
   verdict: { kind: "scale" | "hold" | "cut" | "unknown"; label: string; reason: string };
   next_step?: string;
-  /** "real" = driven by deterministic AdServices attribution; "estimated" = country-average. */
+  /** "real" = driven by native Adapty Apple Ads attribution; "estimated" = country-average. */
   revenue_source: "real" | "estimated";
   /** Measured so far from ASA-attributed users (not projected). */
   paid_so_far: number;
@@ -92,15 +92,60 @@ export interface DailyTotals {
 export interface AppRow {
   app_id: number;
   app_name: string | null;
+  aliases?: string[];
   campaign_count: number;
   active_count: number;
   spend_14d: number;
   installs_14d: number;
 }
 
+export interface PlatformApiMethod {
+  id: string;
+  group: string;
+  name: string;
+  method: string;
+  path: string;
+  kind: "read" | "mutation";
+  access: "read" | "write";
+  integration: "traffic-intelligence" | "catalog-only";
+  integrated: boolean;
+  status: "live-read" | "not-integrated-read-only" | "catalog-only";
+  docsUrl: string;
+}
+
+export interface PlatformApiMethodsPayload {
+  api: string;
+  version: string;
+  baseUrl: string;
+  generatedFromOfficialDocs: string;
+  mode: "read-only";
+  totals: { methods: number; integrated: number; catalogOnly: number; reads: number; mutations: number; sections: number };
+  integrationLegend: Record<string, string>;
+  methods: PlatformApiMethod[];
+}
+
+export interface PlatformSource {
+  status: "live" | "fresh" | "stale-if-error" | "unavailable" | "error" | string;
+  data?: unknown;
+  meta?: { fetchedAt?: string; cachedAt?: string; source?: string; [key: string]: unknown };
+  error?: string;
+}
+
+export interface PlatformInventoryPayload {
+  sources: Record<string, PlatformSource>;
+  partialErrors?: Array<{ source?: string; error?: string }>;
+}
+
 function appQ(appId?: number | "all"): string {
   return appId && appId !== "all" ? `&app_id=${appId}` : "";
 }
+
+/** Global storefront filter: "ALL"/absent = world, else `&country=XX`. */
+function cQ(country?: string): string {
+  return country && /^[A-Z]{2}$/.test(country) ? `&country=${country}` : "";
+}
+
+export interface AppCountry { code: string; spend: number; installs: number; impressions: number }
 
 export interface AsoLocaleSummary {
   locale: string; date: string; tracked: number; ranked: number; top10: number;
@@ -129,32 +174,90 @@ export interface AccountHealth {
 
 export const api = {
   apps: () => get<AppRow[]>("/api/apps"),
-  commandCenter: (appId: number, days = 30) => get<CommandCenterData>(`/api/command-center?app_id=${appId}&days=${days}`),
+  platformMethods: () => get<PlatformApiMethodsPayload>("/api/platform/methods"),
+  platformInventory: (appId: number) => get<PlatformInventoryPayload>(`/api/platform/inventory?app_id=${appId}`),
+  platformReports: (appId: number, days = 30) => get<{ sources?: Record<string, PlatformSource>; partialErrors?: Array<{ source?: string; error?: string }> }>(`/api/platform/reports?app_id=${appId}&days=${days}`),
+  platformSuggestions: (appId: number, country = "US") => get<{ sources?: Record<string, PlatformSource>; partialErrors?: Array<{ source?: string; error?: string }> }>(`/api/platform/suggestions?app_id=${appId}&country=${encodeURIComponent(country)}`),
+  countries: (appId?: number | "all") => get<AppCountry[]>(`/api/countries?days=90${appQ(appId)}`),
+  commandCenter: (appId: number, days = 30, country?: string) => get<CommandCenterData>(`/api/command-center?app_id=${appId}&days=${days}${cQ(country)}`),
   accountHealth: () => get<AccountHealth>("/api/account-health"),
-  negatives: (appId?: number | "all") => get<Array<{ id: number; campaign_id: number; campaign_name: string; country: string; text: string; match_type: string; remote_id: number | null; added_at: string }>>(`/api/negatives${appId && appId !== "all" ? `?app_id=${appId}` : ""}`),
-  geo: (days = 14, appId?: number | "all") =>
-    get<Array<{ country: string; impressions: number; taps: number; installs: number; spend: number; cpi: number; campaigns: number; trials: number }>>(`/api/geo?days=${days}${appQ(appId)}`),
-  campaigns: (days = 14, appId?: number | "all") => get<Campaign[]>(`/api/campaigns?days=${days}${appQ(appId)}`),
-  daily: (days = 14, campaignId?: number, appId?: number | "all") =>
-    get<DailyTotals[]>(`/api/daily?days=${days}${campaignId ? `&campaign_id=${campaignId}` : ""}${appQ(appId)}`),
-  keywords: (days = 14, campaignId?: number, appId?: number | "all") => get<Keyword[]>(`/api/keywords?days=${days}${campaignId ? `&campaign_id=${campaignId}` : ""}${appQ(appId)}`),
-  searchTerms: (days = 14, appId?: number | "all") => get<SearchTerm[]>(`/api/search-terms?days=${days}${appQ(appId)}`),
-  bidRecs: (days = 7, campaignId?: number, appId?: number | "all") => get<BidRec[]>(`/api/recommendations/bids?days=${days}${campaignId ? `&campaign_id=${campaignId}` : ""}${appQ(appId)}`),
-  stRecs: (days = 14, appId?: number | "all") => get<SearchTermSuggestion[]>(`/api/recommendations/search-terms?days=${days}${appQ(appId)}`),
+  negatives: (appId?: number | "all", country?: string) => get<Array<{ id: number; campaign_id: number; campaign_name: string; country: string; text: string; match_type: string; remote_id: number | null; added_at: string }>>(`/api/negatives?x=1${appQ(appId)}${cQ(country)}`),
+  geo: (days = 14, appId?: number | "all", country?: string) =>
+    get<Array<{ country: string; impressions: number; taps: number; installs: number; spend: number; cpi: number; campaigns: number; trials: number }>>(`/api/geo?days=${days}${appQ(appId)}${cQ(country)}`),
+  campaigns: (days = 14, appId?: number | "all", country?: string) => get<Campaign[]>(`/api/campaigns?days=${days}${appQ(appId)}${cQ(country)}`),
+  daily: (days = 14, campaignId?: number, appId?: number | "all", country?: string) =>
+    get<DailyTotals[]>(`/api/daily?days=${days}${campaignId ? `&campaign_id=${campaignId}` : ""}${appQ(appId)}${cQ(country)}`),
+  keywords: (days = 14, campaignId?: number, appId?: number | "all", country?: string) => get<Keyword[]>(`/api/keywords?days=${days}${campaignId ? `&campaign_id=${campaignId}` : ""}${appQ(appId)}${cQ(country)}`),
+  searchTerms: (days = 14, appId?: number | "all", country?: string) => get<SearchTerm[]>(`/api/search-terms?days=${days}${appQ(appId)}${cQ(country)}`),
+  bidRecs: (days = 7, campaignId?: number, appId?: number | "all", country?: string) => get<BidRec[]>(`/api/recommendations/bids?days=${days}${campaignId ? `&campaign_id=${campaignId}` : ""}${appQ(appId)}${cQ(country)}`),
+  stRecs: (days = 14, appId?: number | "all", country?: string) => get<SearchTermSuggestion[]>(`/api/recommendations/search-terms?days=${days}${appQ(appId)}${cQ(country)}`),
   actions: () => get<ActionRow[]>("/api/actions"),
   alerts: () => get<Array<{ id: number; campaign_id: number | null; alert_type: string; message: string; sent_at: string; delivered: number }>>("/api/alerts"),
   checkAlerts: () => post<{ checked: number; sent: number; skipped: number }>("/api/alerts/check"),
-  revenue: (days = 30, appId?: number | "all") =>
-    get<{ rows: Array<{ country: string; trials: number; paid: number; revenueUsd: number }>; error?: string }>(`/api/revenue?days=${days}${appQ(appId)}`),
+  revenue: (days = 30, appId?: number | "all", country?: string) =>
+    get<{ rows: Array<{ country: string; trials: number; paid: number; revenueUsd: number }>; daily?: Array<{ date: string; revenueUsd: number }>; feed?: boolean; error?: string }>(`/api/revenue?days=${days}${appQ(appId)}${cQ(country)}`),
   roiCampaign: (id: number, spend = 1000, days = 14) =>
     get<Projection>(`/api/roi/campaign/${id}?spend=${spend}&days=${days}`),
   roiKeyword: (id: number, spend = 100, days = 14) =>
     get<Projection>(`/api/roi/keyword/${id}?spend=${spend}&days=${days}`),
-  keywordDaily: (id: number, days = 14) =>
-    get<Array<{ date: string; impressions: number; taps: number; installs: number; spend: number; cpt: number; cpi: number }>>(`/api/keywords/${id}/daily?days=${days}`),
+  keywordDaily: (id: number, days = 14, country?: string) =>
+    get<Array<{ date: string; impressions: number; taps: number; installs: number; spend: number; cpt: number; cpi: number }>>(`/api/keywords/${id}/daily?days=${days}${cQ(country)}`),
   enqueueAction: (body: unknown) => post<{ id: number }>("/api/actions", body),
   applyAction: (id: number) => post<{ ok: boolean; error?: string }>(`/api/actions/${id}/apply`),
   cancelAction: (id: number) => post<{ ok: boolean }>(`/api/actions/${id}/cancel`),
   sync: (days = 14) => post<{ ok: boolean; started: boolean }>(`/api/sync`, { days }),
   syncStatus: () => get<{ active: boolean; phase: string; label: string; progress: number; started_at: string | null; finished_at: string | null; ok: number | null; error: string | null }>(`/api/sync/status`),
+  /** Source freshness for the keyword matrix (Apple Ads server). */
+  dataQuality: (iTunesId: string, country?: string) => {
+    const params = new URLSearchParams({ app_id: iTunesId });
+    if (country) params.set("country", country);
+    return get<DataQualityPayload>(`/api/data-quality?${params}`);
+  },
+  /** Cached organic top-5 per keyword (Apple Ads server keeps the ASO snapshots). */
+  cachedTopFiveBatch: (input: { appId: number; locales: string[]; terms: string[]; limit?: number }) =>
+    post<CachedTopFiveBatchPayload>("/api/aso/rankings/top5-batch", input),
 };
+
+/** Resolves an Apple Ads API path (/api/...) for raw fetch calls with custom signals. */
+export const asaApiUrl = url;
+
+export interface DataQualitySource {
+  id: string;
+  name: string;
+  status: "ok" | "stale" | "missing" | "error";
+  updatedAt?: string | null;
+  window?: string;
+  coverage?: number | null;
+  kind: "fact" | "model";
+  message: string;
+}
+
+export interface DataQualityPayload {
+  generatedAt: string;
+  sources: DataQualitySource[];
+}
+
+export interface CachedTopFiveApp {
+  name: string;
+  bundleId?: string | null;
+  iTunesId?: string | null;
+  developer?: string | null;
+  rank: number;
+  iconUrl?: string | null;
+  isOwn?: boolean;
+}
+
+export interface CachedTopFiveItem {
+  locale: string;
+  term: string;
+  observedAt: string | null;
+  yourRank: number | null;
+  total: number | null;
+  apps: CachedTopFiveApp[];
+}
+
+export interface CachedTopFiveBatchPayload {
+  appId: number;
+  items: CachedTopFiveItem[];
+  missing: Array<{ locale: string; term: string; reason: string }>;
+}

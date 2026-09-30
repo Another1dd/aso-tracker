@@ -4,6 +4,11 @@ import { api, type Campaign, type DailyTotals, type Keyword, type BidRec } from 
 import Sparkline from "../components/Sparkline.tsx";
 import CampaignControls from "../components/CampaignControls.tsx";
 import BidChangeConfirm from "../components/BidChangeConfirm.tsx";
+import { campaignDisplayName, campaignTechnicalName } from "../lib/campaignNames.ts";
+import Dropdown from "../components/Dropdown.tsx";
+import { useCountry } from "../lib/CountryContext.tsx";
+import { ScopeBadge } from "../components/CountrySwitcher.tsx";
+import { BIDS_GLOBAL_HINT } from "../lib/countries.ts";
 
 function fmtUsd(n: number): string { return `$${n.toFixed(2)}`; }
 function fmtPct(n: number): string { return `${(n * 100).toFixed(1)}%`; }
@@ -11,7 +16,10 @@ function fmtPct(n: number): string { return `${(n * 100).toFixed(1)}%`; }
 export default function CampaignDetail() {
   const { id } = useParams();
   const cid = Number(id);
+  const { country, isWorld, label } = useCountry();
   const [campaign, setCampaign] = useState<Campaign | undefined>();
+  /** Country mode: the campaign exists but does not target / deliver there. */
+  const [notServing, setNotServing] = useState(false);
   const [daily, setDaily] = useState<DailyTotals[]>([]);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [recs, setRecs] = useState<BidRec[]>([]);
@@ -21,13 +29,21 @@ export default function CampaignDetail() {
   const [pendingChange, setPendingChange] = useState<{ keyword: Keyword; newBid: number; reason?: string } | null>(null);
 
   async function load(): Promise<void> {
-    const [allCamps, d, kw, r] = await Promise.all([
+    const [allCamps, scoped, d, kw, r] = await Promise.all([
       api.campaigns(days),
-      api.daily(days, cid),
-      api.keywords(days, cid),
+      isWorld ? Promise.resolve(null) : api.campaigns(days, undefined, country),
+      api.daily(days, cid, undefined, country),
+      api.keywords(days, cid, undefined, country),
+      // A keyword bid is one number for every storefront: recommendations are
+      // always the campaign's world ones, whatever the country filter.
       api.bidRecs(days, cid),
     ]);
-    setCampaign(allCamps.find((c) => c.id === cid));
+    const world = allCamps.find((c) => c.id === cid);
+    const inCountry = scoped?.find((c) => c.id === cid);
+    // Country mode: metadata from the campaign, metrics from its storefront
+    // slice; zero when the campaign does not serve that storefront.
+    setNotServing(Boolean(scoped && world && !inCountry));
+    setCampaign(scoped && world ? inCountry ?? { ...world, impressions: 0, taps: 0, installs: 0, spend: 0, cpi: 0, cpt: 0, ttr: 0, install_rate: 0, trial_starts: 0 } : world);
     setDaily(d);
     setKeywords(kw);
     setRecs(r);
@@ -36,7 +52,7 @@ export default function CampaignDetail() {
   useEffect(() => {
     setLoading(true);
     load().finally(() => setLoading(false));
-  }, [cid, days]);
+  }, [cid, country, days]);
 
   const recMap = new Map(recs.map((r) => [r.keyword_id, r]));
   const dates = daily.map((d) => d.date);
@@ -72,8 +88,8 @@ export default function CampaignDetail() {
     }
   }
 
-  if (loading && !campaign) return <div className="empty">Loading…</div>;
-  if (!campaign) return <div className="empty">Campaign not found. <Link to="/">Back</Link></div>;
+  if (loading && !campaign) return <div className="data-state loading">Загружаем кампанию…</div>;
+  if (!campaign) return <div className="data-state">Кампания не найдена. <Link to="/">Вернуться к обзору</Link></div>;
 
   return (
     <>
@@ -88,84 +104,91 @@ export default function CampaignDetail() {
       )}
       <div className="topbar">
         <div>
-          <Link to="/" className="muted" style={{ fontSize: 12 }}>← Dashboard</Link>
-          <h2 style={{ marginTop: 4 }}>{campaign.name}</h2>
-          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-            {campaign.country} · {campaign.bidding_strategy} · daily {fmtUsd(campaign.daily_budget)} · lifetime {fmtUsd(campaign.lifetime_budget)} · {campaign.status}
+          <Link to="/" className="back-link">← Обзор</Link>
+          <div className="title-with-scope">
+            <h1 className="ds-page-title">{campaignDisplayName(campaign.name)}</h1>
+            <ScopeBadge />
           </div>
+          {campaignTechnicalName(campaign.name) && <p className="note">{campaign.name}</p>}
+          <p className="ds-page-sub">
+            {campaign.country} · {campaign.bidding_strategy} · дневной лимит {fmtUsd(campaign.daily_budget)} · лимит на весь срок {fmtUsd(campaign.lifetime_budget)} · {campaign.status}
+          </p>
         </div>
-        <div className="controls" style={{ alignItems: "center" }}>
+        <div className="controls">
           <CampaignControls campaign={campaign} onChange={() => void load()} />
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            <option value={7}>7 days</option>
-            <option value={14}>14 days</option>
-            <option value={30}>30 days</option>
-          </select>
+          <Dropdown ariaLabel="Период" value={days} onChange={(v) => setDays(v)} options={[{ value: 7, label: "7 дней" }, { value: 14, label: "14 дней" }, { value: 30, label: "30 дней" }]} />
         </div>
       </div>
+
+      {notServing && (
+        <div className="callout warn callout-block">Кампания не работает в стране «{label}»: у неё нет этой витрины и показов там за период. Метрики ниже — нули; выберите «Весь мир», чтобы увидеть кампанию целиком.</div>
+      )}
+      {!isWorld && !notServing && (
+        <p className="note country-note">Метрики — только витрина «{label}» (отчёт Apple Ads по странам). Ставки ключей общие для всех стран кампании, поэтому менять их можно только в режиме «Весь мир».</p>
+      )}
 
       <div className="spark-row">
-        <Sparkline title="Spend / day" value={fmtUsd(campaign.spend)} data={daily.map((d) => d.spend)} labels={dates} color="#4ade80" format={fmtUsd} />
-        <Sparkline title="Installs / day" value={String(campaign.installs)} data={daily.map((d) => d.installs)} labels={dates} color="#60a5fa" format={(n) => String(Math.round(n))} />
-        <Sparkline title="CPI" value={campaign.cpi > 0 ? fmtUsd(campaign.cpi) : "—"} data={daily.map((d) => d.cpi)} labels={dates} color="#facc15" format={fmtUsd} />
-        <Sparkline title="Impressions / day" value={String(campaign.impressions)} data={daily.map((d) => d.impressions)} labels={dates} color="#a78bfa" format={(n) => String(Math.round(n))} />
+        <Sparkline title="Расход" value={fmtUsd(campaign.spend)} data={daily.map((d) => d.spend)} labels={dates} color="var(--ds-c1)" format={fmtUsd} />
+        <Sparkline title="Установки" value={String(campaign.installs)} data={daily.map((d) => d.installs)} labels={dates} color="var(--ds-c2)" format={(n) => String(Math.round(n))} />
+        <Sparkline title="CPI" lowerIsBetter value={campaign.cpi > 0 ? fmtUsd(campaign.cpi) : "—"} data={daily.map((d) => d.cpi)} labels={dates} color="var(--ds-c3)" format={fmtUsd} />
+        <Sparkline title="Показы" value={String(campaign.impressions)} data={daily.map((d) => d.impressions)} labels={dates} color="var(--ds-c4)" format={(n) => String(Math.round(n))} />
       </div>
 
-      <div className="card">
-        <h3>Keywords ({keywords.length}) · {recs.length} recommendations</h3>
-      </div>
+      <h2 className="ds-h2">Ключевые слова · {keywords.length} <span className="muted">· рекомендаций: {recs.length}</span></h2>
 
+      <div className="table-wrap table-tall">
       <table>
         <thead>
           <tr>
-            <th>Keyword</th>
-            <th>Match</th>
-            <th>Status</th>
-            <th className="num">Bid</th>
-            <th className="num">Imp</th>
-            <th className="num">Taps</th>
-            <th className="num">Inst</th>
+            <th>Ключевое слово</th>
+            <th title="Тип соответствия">Тип</th>
+            <th>Статус</th>
+            <th className="num">Ставка</th>
+            <th className="num">Показы</th>
+            <th className="num">Тапы</th>
+            <th className="num">Установки</th>
             <th className="num">CPT</th>
-            <th className="num">Spend</th>
-            <th>Recommendation</th>
-            <th style={{ minWidth: 200 }}>Quick bid</th>
+            <th className="num">Расход</th>
+            <th title={isWorld ? undefined : "Рекомендация ставки считается по всем странам кампании: ставка ключа одна на все витрины"}>{isWorld ? "Рекомендация" : "Рекомендация · все страны"}</th>
+            <th className="col-bid">Ставка</th>
           </tr>
         </thead>
         <tbody>
           {keywords.map((k) => {
             const rec = recMap.get(k.id);
-            const isBusy = busy.has(k.id);
+            // A keyword bid applies to every storefront of the campaign.
+            const isBusy = busy.has(k.id) || !isWorld;
             const alreadyAtRec = rec && Math.abs(k.bid - rec.recommended_bid) < 0.005;
             const down10 = Math.max(0.05, Math.round(k.bid * 0.9 * 100) / 100);
             const up10 = Math.round(k.bid * 1.1 * 100) / 100;
             const delta = rec ? rec.recommended_bid - rec.current_bid : 0;
             return (
               <tr key={k.id}>
-                <td>{k.text}</td>
+                <td className="cell-clip cell-kw" title={k.text}>{k.text}</td>
                 <td><span className="badge">{k.match_type}</span></td>
-                <td><span className={`badge ${k.status === "ACTIVE" ? "ok" : "warn"}`}>{k.status.toLowerCase()}</span></td>
+                <td><span className={`badge ${k.status === "ACTIVE" ? "ok" : "warn"}`}>{k.status === "ACTIVE" ? "активен" : k.status === "PAUSED" ? "пауза" : k.status.toLowerCase()}</span></td>
                 <td className="num">{fmtUsd(k.bid)}</td>
                 <td className="num">{k.impressions}</td>
                 <td className="num">{k.taps}</td>
                 <td className="num">{k.installs}</td>
                 <td className="num">{k.cpt > 0 ? fmtUsd(k.cpt) : "—"}</td>
                 <td className="num">{fmtUsd(k.spend)}</td>
-                <td>
+                <td className="cell-rec">
                   {rec && !alreadyAtRec ? (
-                    <span title={rec.reason} className="muted" style={{ fontSize: 11 }}>
+                    <span title={rec.reason} className="rec-cell">
                       <span className={`badge ${rec.confidence === "high" ? "ok" : rec.confidence === "medium" ? "warn" : ""}`}>
                         {delta > 0 ? "↑" : "↓"} {fmtUsd(rec.recommended_bid)}
-                      </span>{" "}
-                      {rec.reason}
+                      </span>
+                      <span className="rec-reason">{rec.reason}</span>
                     </span>
                   ) : <span className="muted">—</span>}
                 </td>
                 <td>
                   <div className="btn-group">
-                    <button className="compact down" disabled={isBusy || k.bid <= 0.05} onClick={() => requestBidChange(k, down10, "Lower bid 10%")} title={`Lower 10% → ${fmtUsd(down10)}`}>−10%</button>
-                    <button className="compact up" disabled={isBusy} onClick={() => requestBidChange(k, up10, "Raise bid 10%")} title={`Raise 10% → ${fmtUsd(up10)}`}>+10%</button>
+                    <button className="compact down" disabled={isBusy || k.bid <= 0.05} onClick={() => requestBidChange(k, down10, "Контролируемое снижение ставки на 10%")} title={isWorld ? `Снизить на 10% → ${fmtUsd(down10)}` : BIDS_GLOBAL_HINT}>−10%</button>
+                    <button className="compact up" disabled={isBusy} onClick={() => requestBidChange(k, up10, "Контролируемое повышение ставки на 10%")} title={isWorld ? `Повысить на 10% → ${fmtUsd(up10)}` : BIDS_GLOBAL_HINT}>+10%</button>
                     {rec && !alreadyAtRec && (
-                      <button className={`compact ${delta > 0 ? "primary up" : "down"}`} disabled={isBusy} onClick={() => requestBidChange(k, rec.recommended_bid, rec.reason)} title={rec.reason}>
+                      <button className={`compact ${delta > 0 ? "up" : "down"}`} disabled={isBusy} onClick={() => requestBidChange(k, rec.recommended_bid, rec.reason)} title={isWorld ? rec.reason : BIDS_GLOBAL_HINT}>
                         → {fmtUsd(rec.recommended_bid)}
                       </button>
                     )}
@@ -176,19 +199,20 @@ export default function CampaignDetail() {
           })}
         </tbody>
       </table>
+      </div>
 
-      <div className="divider">Daily breakdown</div>
-      <div style={{ fontSize: 12, color: "var(--bone-dim)" }}>
-        <table style={{ marginTop: 8, fontSize: 12 }}>
+      <h2 className="ds-h2">Разбивка по дням</h2>
+      <div className="table-wrap">
+        <table>
           <thead>
             <tr>
-              <th>Date</th>
-              <th className="num">Imp</th>
-              <th className="num">Taps</th>
+              <th>Дата</th>
+              <th className="num">Показы</th>
+              <th className="num">Тапы</th>
               <th className="num">TTR</th>
-              <th className="num">Inst</th>
+              <th className="num">Установки</th>
               <th className="num">CPI</th>
-              <th className="num">Spend</th>
+              <th className="num">Расход</th>
             </tr>
           </thead>
           <tbody>

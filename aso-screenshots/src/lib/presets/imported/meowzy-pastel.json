@@ -1,0 +1,65 @@
+{
+  "id": "meowzy-pastel",
+  "name": "Meowzy Pastel Mascot",
+  "kind": "real",
+  "description": "Meowzy (games for cats), YAZIO composition: one light cool-grey background with a soft white glow behind the device, big heavy LEFT-aligned navy headline (Nunito 900) with an orange subline, the Apple bezel upright, large and bleeding off the bottom edge at the same place on every frame; the orange-cat mascot peeks around the device edges and facts sit in rounded chips over the screen edge (slot decor).",
+  "recommendedFor": "pets / kids / casual apps with a mascot",
+  "background": {
+    "type": "radial",
+    "css": "radial-gradient(85% 48% at 50% 64%, #FFFFFF 0%, #F3F6FB 55%, #E9EEF6 100%)"
+  },
+  "text": {
+    "font": "Nunito",
+    "weight": 900,
+    "color": "#1B2340",
+    "uppercase": false,
+    "align": "left",
+    "subtitleColor": "#E2650A",
+    "subtitleWeight": 800,
+    "subtitleUppercase": false,
+    "titleLineHeight": 1.0,
+    "titleLetterSpacing": "-0.015em",
+    "subtitleGapU": 1.2,
+    "sidePaddingU": 7,
+    "textWrap": "balance",
+    "pill": {
+      "bg": "#FFC21A",
+      "fg": "#1B2340",
+      "weight": 900,
+      "sizeFrac": 0.3,
+      "letterSpacing": "0.04em",
+      "shadow": "0 0.6u 1.8u rgba(20,30,60,.18)"
+    },
+    "wordBreak": "keep-all"
+  },
+  "layout": {},
+  "tiltDeg": 0,
+  "breakout": "none",
+  "isGradient": true,
+  "suggestedAccent": "#F2770F",
+  "decorationsHint": "one light cool-grey canvas for all frames, soft white glow behind the device; the orange tabby mascot peeks over/around the upright device; rounded chips in brand blue/orange/yellow.",
+  "device": {
+    "asset": "iphone",
+    "scale": 1.0,
+    "ipad": {
+      "scale": 1.0
+    },
+    "shadow": "0 2.4u 6u rgba(40,30,90,.22)",
+    "frameStyle": "apple",
+    "bezelColor": {
+      "iphone": "deep-blue",
+      "ipad": "space-black"
+    }
+  },
+  "samples": [
+    {
+      "verb": "Cat games for cats",
+      "descriptor": "Your cat hunts on the screen",
+      "text": {
+        "yFraction": 0.05,
+        "titlePx": 150,
+        "subPx": 62
+      }
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, SegmentedControl } from '../components/shared';
+import { Button, Card, SegmentedControl, PageHeader } from '../components/shared';
 import { PresetSampleStrip } from '../components/studio/PresetSampleStrip';
 import { PRESETS } from '../lib/presets';
 import { useStudio } from '../state/studio';
@@ -14,20 +14,15 @@ export function CatalogScreen() {
 
   return (
     <div style={{ padding: 'var(--s-7)', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1280, margin: '0 auto' }}>
-      <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Style catalog</h1>
-          <p style={{ margin: '6px 0 0', color: 'var(--fg-2)', fontSize: 13 }}>
-            Each row is a 5-screenshot preview of how the style scales across an App Store listing. Click a row to pick.
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <PageHeader
+        title="Style catalog"
+        sub="Each row is a 5-screenshot preview of how the style scales across an App Store listing. Click a row to pick."
+        actions={<>
           {/* Project-wide accent — every preset thumbnail re-tints live so you can
               compare styles already wearing your brand color. Same swatches as
               Inspector's accent picker so the two stay in sync. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, color: 'var(--fg-2)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <span className="ds-group-label">
               Accent
             </span>
             <div style={{ display: 'flex', gap: 4 }}>
@@ -42,7 +37,7 @@ export function CatalogScreen() {
                     onClick={() => setProject({ appColor: hex })}
                     title={hex}
                     style={{
-                      width: 22, height: 22,
+                      width: 24, height: 24,
                       borderRadius: 6,
                       background: hex,
                       border: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
@@ -61,11 +56,7 @@ export function CatalogScreen() {
                 onInput={(e) => setProject({ appColor: (e.target as HTMLInputElement).value })}
                 onChange={(e) => setProject({ appColor: e.target.value })}
                 title="Custom hex"
-                style={{
-                  width: 22, height: 22, padding: 0,
-                  border: '1px solid var(--line-2)', borderRadius: 6,
-                  background: 'transparent', cursor: 'pointer',
-                }}
+                style={{ width: 32, height: 24 }}
               />
             </div>
           </div>
@@ -79,8 +70,8 @@ export function CatalogScreen() {
             value={catalogFilter}
             onChange={setCatalogFilter}
           />
-        </div>
-      </header>
+        </>}
+      />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {visible.map((p) => {
@@ -90,60 +81,39 @@ export function CatalogScreen() {
               key={p.id}
               type="button"
               onClick={() => pickPreset(p.id)}
-              className="preset-card"
+              className={`preset-card ds-tile${active ? ' on' : ''}`}
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 12,
-                padding: 14,
-                borderRadius: 'var(--r-4)',
-                border: `1px solid ${active ? 'var(--accent)' : 'var(--line-1)'}`,
-                background: 'var(--bg-1)',
-                cursor: 'pointer',
-                transition: 'all .12s',
-                textAlign: 'left',
-                color: 'inherit',
-                font: 'inherit',
-                boxShadow: active ? '0 0 0 3px var(--accent-ring)' : 'none',
+                padding: 16,
+                transition: 'box-shadow .12s',
+                ...(active ? { background: 'var(--ds-panel)' } : null),
               }}
             >
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
-                    <span style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      {p.kind}
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="ds-card-title">{p.name}</span>
+                    <span className="ds-badge ds-badge-muted">{p.kind === 'real' ? 'Real' : p.kind === 'abstract' ? 'Abstract' : p.kind}</span>
                   </div>
-                  <span style={{ fontSize: 11.5, color: 'var(--fg-2)', lineHeight: 1.4 }}>{p.description}</span>
+                  <span className="ds-note">{p.description}</span>
                 </div>
                 {active && (
-                  <span
-                    style={{
-                      padding: '2px 8px',
-                      background: 'var(--accent)',
-                      color: 'var(--accent-fg)',
-                      fontSize: 10,
-                      fontWeight: 600,
-                      borderRadius: 'var(--r-pill)',
-                      flex: 'none',
-                    }}
-                  >
-                    SELECTED
-                  </span>
+                  <span className="ds-badge" style={{ flex: 'none' }}>Selected</span>
                 )}
               </div>
 
               <PresetSampleStrip preset={p} accentOverride={appColor} primarySourceUrl={primarySourceUrl} />
 
-              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>For: {p.recommendedFor}</span>
+              <span className="ds-note">For: {p.recommendedFor}</span>
             </button>
           );
         })}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>
+        <span className="ds-note">
           {(() => {
             const cur = PRESETS.find((p) => p.id === selectedPresetId);
             if (!cur) return 'Pick a preset above. You can switch styles anytime in the Editor.';
@@ -154,7 +124,6 @@ export function CatalogScreen() {
           <Button variant="ghost" onClick={() => nav('/setup')}>← Back</Button>
           <Button
             variant="primary"
-            size="lg"
             disabled={!selectedPresetId}
             onClick={() => {
               // Re-seed screenshots from the chosen preset right before navigating —
@@ -172,7 +141,7 @@ export function CatalogScreen() {
       {!selectedPresetId && (
         <Card>
           <Card.Section>
-            <span style={{ fontSize: 12, color: 'var(--fg-2)' }}>
+            <span className="ds-note">
               Tip: thumbnails preview the style with your first uploaded screenshot if you've added one. Otherwise placeholder content is shown.
             </span>
           </Card.Section>
