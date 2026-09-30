@@ -50,7 +50,7 @@ export default function CompetitorWatch({ appId, competitor, storefront, watch, 
         <h2>Недельный разбор</h2>
         <p className="competitor-muted">
           Раз в неделю, после ночного обновления рангов, трекер сверит название и подзаголовок конкурента, проверит фразы из его метаданных
-          и соберёт слова, по которым он в выдаче, а мы нет. Разбор идёт по всем витринам приложения, не чаще 10 в ночь.
+          и соберёт слова, по которым он в выдаче, а мы нет. Разбор идёт по всем витринам приложения, не чаще 25 в ночь.
         </p>
         <button type="button" className="ds-btn" disabled={busy} onClick={() => act(() => watchApi.add(appId, competitor.bundleId))}>Следить еженедельно</button>
         {message ? <p role="alert">{message}</p> : null}

@@ -45,7 +45,7 @@ db.exec(`
 
 const WEEK_MS = 7 * 86_400_000;
 const MAX_TERMS_PER_RUN = 15;
-const MAX_COMBOS_PER_DAY = 10;
+const MAX_COMBOS_PER_DAY = 25;
 const CHECK_TIMEOUT_MS = 20 * 60_000;
 
 interface WatchRow { app_id: string; competitor_id: string; bundle_id: string; name: string; developer: string | null; added_at: number }
