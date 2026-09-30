@@ -44,6 +44,8 @@ test('drops competitor brands, app titles, fragments and off-topic phrases', () 
     'mri software',
     'birth chart',
     'imaging',
+    'mri viewer \u309A',
+    'ct viewer \u2022',
   ]) {
     const result = assess(phrase);
     assert.equal(result.ok, false, `${phrase} should be rejected`);

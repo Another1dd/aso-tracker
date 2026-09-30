@@ -48,7 +48,7 @@ export interface KeywordSuggestionsResponse {
   generatedAt: string;
   formula: string;
   signals: {
-    appleAutocomplete: 'ok' | 'empty';
+    appleAutocomplete: 'ok' | 'empty' | 'error';
     asaPopularity: 'ok' | 'no-data' | 'unavailable';
     competitorApps: number;
   };
@@ -212,6 +212,8 @@ export function assessCandidate(phrase: string, vocab: Vocabulary, profile: Rele
   const text = normalized(phrase);
   if (/\s[-–—|]\s|[:|–—]/.test(text)) return { ok: false, reason: 'это название приложения, а не поисковый запрос' };
   if (/[&+!?/@#*()[\]"'.,;]/.test(text)) return { ok: false, reason: 'обрывок названия приложения (символы «&», «+», «/»…)' };
+  // Whitelist: letters, digits, single hyphens and spaces; marks only glued to a letter.
+  if (/[^\p{L}\p{N}\p{M}\s-]|(^|[^\p{L}\p{N}])\p{M}/u.test(text)) return { ok: false, reason: 'посторонние символы в названии приложения' };
   const tokens = tokenize(text);
   if (!tokens.length) return { ok: false, reason: 'пустая фраза' };
   if (tokens.length > 4) return { ok: false, reason: 'слишком длинная фраза — так не ищут' };
@@ -343,8 +345,8 @@ const hintCache = new Map<string, { expiresAt: number; hints: string[] }>();
 
 /** App Store search autocomplete. The `MacSearchAds` client only echoes the
  * seed back; the `Software` client with a storefront header returns the real,
- * popularity-ordered hint list. */
-async function appleHints(seed: string, country: string, priority: GatePriority = 'interactive'): Promise<string[]> {
+ * popularity-ordered hint list. `null` means the request failed: unknown, not "no hints". */
+async function appleHints(seed: string, country: string, priority: GatePriority = 'interactive'): Promise<string[] | null> {
   const key = `${country}:${seed}`;
   const cached = hintCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.hints;
@@ -367,7 +369,7 @@ async function appleHints(seed: string, country: string, priority: GatePriority 
     hintCache.set(key, { expiresAt: Date.now() + 6 * 60 * 60_000, hints });
     return hints;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -653,9 +655,10 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
     .slice(0, 12);
   const hintGroups = await Promise.all(seeds.map((seed) => appleHints(seed, country)));
   let hintCount = 0;
+  const hintErrors = hintGroups.filter((hints) => hints === null).length;
   hintGroups.forEach((hints, seedIndex) => {
     const seed = seeds[seedIndex];
-    hints.forEach((hint, index) => {
+    hints?.forEach((hint, index) => {
       hintCount++;
       if (hint === seed) return;
       const candidate = consider(hint);
@@ -768,7 +771,7 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
     generatedAt: new Date().toISOString(),
     formula: GAIN_FORMULA,
     signals: {
-      appleAutocomplete: hintCount > 0 ? 'ok' : 'empty',
+      appleAutocomplete: hintCount > 0 ? 'ok' : hintErrors > 0 ? 'error' : 'empty',
       asaPopularity: asa == null ? 'unavailable' : asaWithPopularity > 0 ? 'ok' : 'no-data',
       competitorApps: competitorAppKeys.size,
     },

@@ -364,7 +364,7 @@ export interface KeywordSuggestionsResponse {
   generatedAt: string;
   formula: string;
   signals: {
-    appleAutocomplete: 'ok' | 'empty';
+    appleAutocomplete: 'ok' | 'empty' | 'error';
     asaPopularity: 'ok' | 'no-data' | 'unavailable';
     competitorApps: number;
   };
