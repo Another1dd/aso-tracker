@@ -81,7 +81,14 @@ function report(label: string, samples: Sample[]) {
   const floor = usable.filter((sample) => sample.popularity <= 5);
   const rho = usable.length > 2 ? spearman(usable.map((s) => s.signal!), usable.map((s) => s.popularity)) : NaN;
   const area = above.length && floor.length ? auc(above.map((s) => s.signal!), floor.map((s) => s.signal!)) : NaN;
-  console.log(`${label}: terms ${samples.length}, usable ${usable.length}, above 5: ${above.length}, floor: ${floor.length}, Spearman ${f(rho)}, AUC ${f(area)}`);
+  // Control: does depth beat "short phrases are more popular"? Also AUC within word-count strata.
+  const shortAuc = above.length && floor.length ? auc(above.map((s) => -s.term.length), floor.map((s) => -s.term.length)) : NaN;
+  const strata = [1, 2, 3].map((words) => {
+    const inStratum = usable.filter((s) => Math.min(s.term.split(' ').length, 3) === words);
+    const up = inStratum.filter((s) => s.popularity > 5); const down = inStratum.filter((s) => s.popularity <= 5);
+    return up.length >= 5 && down.length >= 5 ? `${words === 3 ? '3+' : words} words ${f(auc(up.map((s) => s.signal!), down.map((s) => s.signal!)))} (n ${up.length}/${down.length})` : `${words === 3 ? '3+' : words} words n/a`;
+  });
+  console.log(`${label}: terms ${samples.length}, usable ${usable.length}, above 5: ${above.length}, floor: ${floor.length}, Spearman ${f(rho)}, AUC ${f(area)}; control AUC of phrase shortness ${f(shortAuc)}; depth AUC within strata: ${strata.join(', ')}`);
   return { rho, area, above: above.length };
 }
 
