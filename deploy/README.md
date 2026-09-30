@@ -99,6 +99,12 @@ curl -s http://127.0.0.1:5173/api/snapshot/state                # progress of a 
 curl -s http://127.0.0.1:5173/asa-api/keyword-popularity/status # popularity queue (needs the credentials)
 ```
 
+The nightly job is armed only when `keywords.backgroundJobs` is `true` in `/__studio/status` (and
+`schedule.json` in `~/.aso-studio/keywords/` gets today's `lastNightlyDay`). The gateway starts a product's
+background jobs on the first request to its UI, so `deploy/aso-ui.sh` requests `/` once after every start;
+if you ever see `false`, open `http://<mac-lan-ip>:5173/` once. The first start has no catch-up run: the first
+refresh happens at the next 04:00.
+
 Do not start a second refresh while one is running: check `/api/snapshot/state` first. Apple blocks the
 IP for a few minutes when requests come too fast.
 

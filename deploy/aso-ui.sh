@@ -10,12 +10,12 @@ cd "$(dirname "$0")/.."
 export STUDIO_HOST="${STUDIO_HOST:-0.0.0.0}"
 PORT="${STUDIO_PORT:-5173}"
 
-# The gateway loads products lazily; the Keywords API owns the 04:00 nightly refresh,
-# so touch it once after start or the job stays unarmed until someone opens the UI.
+# The gateway runs a product's background jobs (the 04:00 nightly refresh) only once its UI
+# is first requested; loading the API alone does not arm them. Request the UI page once.
 (
   for _ in 1 2 3 4 5 6; do
     sleep 10
-    curl -fsS "http://127.0.0.1:$PORT/api/schedule?brief=1" >/dev/null 2>&1 && break
+    curl -fsS -m 90 -o /dev/null "http://127.0.0.1:$PORT/" && break
   done
 ) &
 
