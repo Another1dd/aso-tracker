@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import './Competitors.css';
 import Icon from '../components/Icon';
 import CompetitorSpy from '../components/CompetitorSpy';
+import CompetitorWatch from '../components/CompetitorWatch';
+import { watchApi, type WatchList } from '../competitorWatchApi';
 import { useDismiss } from '../components/useDismiss';
 import { Sparkline } from '../../../shared/charts/Charts';
 import {
@@ -23,11 +25,12 @@ export interface CompetitorsProps {
   onKeywordsChanged?: (keywords: Record<string, string[]>) => void;
 }
 
-type DetailTab = 'profile' | 'keywords' | 'gap';
+type DetailTab = 'profile' | 'keywords' | 'gap' | 'weekly';
 const DETAIL_TABS: Array<{ id: DetailTab; label: string }> = [
   { id: 'profile', label: 'Профиль' },
   { id: 'keywords', label: 'Ключи конкурента' },
   { id: 'gap', label: 'Gap' },
+  { id: 'weekly', label: 'Недельный разбор' },
 ];
 
 type AppleTrafficTerm = {
@@ -178,6 +181,20 @@ export default function Competitors({ app, locale, onKeywordsChanged }: Competit
     api.keywords(app.id).then((map) => { if (!cancelled) setStorefronts(Object.keys(map)); }).catch(() => {});
     return () => { cancelled = true; };
   }, [app.id]);
+
+  const [watch, setWatch] = useState<WatchList | null>(null);
+  const reloadWatch = () => { watchApi.list(app.id).then(setWatch).catch(() => {}); };
+  useEffect(() => {
+    let cancelled = false;
+    watchApi.list(app.id).then((data) => { if (!cancelled) setWatch(data); }).catch(() => { if (!cancelled) setWatch(null); });
+    return () => { cancelled = true; };
+  }, [app.id]);
+  const watchRunning = Boolean(watch?.running);
+  useEffect(() => {
+    if (!watchRunning) return;
+    const timer = window.setInterval(() => { watchApi.list(app.id).then(setWatch).catch(() => {}); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [app.id, watchRunning]);
 
   const keywordsChanged = (map: Record<string, string[]>) => {
     setStorefronts(Object.keys(map));
@@ -339,7 +356,7 @@ export default function Competitors({ app, locale, onKeywordsChanged }: Competit
   const listNeedle = listQuery.trim().toLocaleLowerCase();
   const matches = (competitor: CompetitorSummary) => !listNeedle || `${competitor.name} ${competitor.dev} ${competitor.bundleId}`.toLocaleLowerCase().includes(listNeedle);
   const visibleCompetitors = competitors.filter(matches);
-  const visibleManual = manual.filter(matches);
+  const visibleManual = manual.filter((item) => matches(item) && !watch?.competitors.some((row) => row.bundleId === item.bundleId));
 
   return (
     <section className="content" aria-label="Конкуренты">
@@ -359,6 +376,16 @@ export default function Competitors({ app, locale, onKeywordsChanged }: Competit
           </div>
           <p className="competitor-muted">Показы — число появлений в отслеживаемом топе; средняя позиция — агрегированная оценка по снимкам.</p>
           <CompetitorFind country={locale.split('-')[0]} ownTrackId={app.iTunesId} onPick={addManual} onQueryChange={setListQuery} />
+          {watch?.competitors.length ? (
+            <div className="competitors-list" aria-label="Под еженедельным наблюдением">
+              {watch.competitors.map((item) => (
+                <button key={item.competitorId} onClick={() => { addManual({ bundleId: item.bundleId, name: item.name, dev: item.developer ?? '', appearances: 0, localesCount: 0, avgRank: 0, top1Count: 0, top3Count: 0, bestRank: 0, lastSeen: null }); setTab('weekly'); }} aria-pressed={selectedBundle === item.bundleId} className={selectedBundle === item.bundleId ? 'selected' : ''}>
+                  <strong>{item.name}</strong>
+                  <small>{item.developer ?? ''} · наблюдение, разборов: {Object.keys(item.digests).length}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {visibleManual.length ? (
             <div className="competitors-list">
               {visibleManual.map((competitor) => (
@@ -390,7 +417,9 @@ export default function Competitors({ app, locale, onKeywordsChanged }: Competit
             </div>
           ) : null}
           {selected && tab !== 'profile' ? (
-            <CompetitorSpy appId={app.id} appName={app.name} competitor={selected.bundleId} storefront={locale} storefronts={storefronts} view={tab} onKeywordsChanged={keywordsChanged} />
+            tab === 'weekly'
+              ? <CompetitorWatch appId={app.id} competitor={{ bundleId: selected.bundleId, name: selected.name }} storefront={locale} watch={watch} onChanged={reloadWatch} />
+              : <CompetitorSpy appId={app.id} appName={app.name} competitor={selected.bundleId} storefront={locale} storefronts={storefronts} view={tab} onKeywordsChanged={keywordsChanged} />
           ) : !selected ? <div className="competitor-panel competitor-state">Выберите конкурента слева, чтобы увидеть профиль и пересечения по ключевым словам.</div> : detail.loading ? <div className="competitor-panel competitor-state">Загрузка профиля конкурента…</div> : detail.error ? <div className="competitor-panel competitor-state" role="alert">Не удалось загрузить профиль: {detail.error}</div> : (
             <>
               <section className="competitor-panel">
