@@ -91,6 +91,12 @@ const MODIFIERS = new Set([
   'de', 'la', 'el', 'para', 'di', 'per', 'und', 'für', 'et', 'pour', 'le', 'les', 'des', 'do', 'da',
   'y', 'e', 'o', 'u', 'i', 'и', 'с', 'в', 'для',
 ]);
+/** Articles and prepositions: a search phrase never starts or ends with one ("menopause by", "for kids"). */
+const FUNCTION_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'of', 'on', 'in', 'to', 'a', 'an', 'by',
+  'de', 'la', 'el', 'para', 'di', 'per', 'und', 'für', 'et', 'pour', 'le', 'les', 'des', 'do', 'da',
+  'y', 'e', 'o', 'u', 'i', 'и', 'с', 'в', 'для',
+]);
 const CATEGORY_WORDS = new Set([
   'viewer', 'view', 'reader', 'read', 'open', 'opener', 'file', 'files', 'image', 'images',
   'photo', 'photos', 'scan', 'scanner', 'editor', 'player', 'tool', 'tools', 'converter',
@@ -226,6 +232,8 @@ export function assessCandidate(phrase: string, vocab: Vocabulary, profile: Rele
   if (tokens.some((token, index) => token.length === 1 && !/\d/.test(token) && !MODIFIERS.has(token) && !(token === 'x' && tokens[index + 1] === 'ray'))) {
     return { ok: false, reason: 'бессмысленный одиночный символ' };
   }
+  if (tokens.length > 1 && tokens.some((token) => /^\d+$/.test(token))) return { ok: false, reason: 'число отдельным словом — обрывок названия или версии' };
+  if (tokens.length > 1 && (FUNCTION_WORDS.has(tokens[0]) || FUNCTION_WORDS.has(tokens[tokens.length - 1]))) return { ok: false, reason: 'начинается или заканчивается служебным словом — так не ищут' };
   const kinds = tokens.map((token) => classifyToken(token, vocab, profile));
   const brand = tokens.find((_, index) => kinds[index] === 'brand');
   if (brand) {

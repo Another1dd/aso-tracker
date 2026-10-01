@@ -44,6 +44,12 @@ test('the ideas filter rejects stray marks and off-topic phrases under the ancho
     assert.equal(assessCandidate(phrase, vocab, profile).ok, false, phrase);
   }
   assert.equal(assessCandidate('night sweats tracker', vocab, profile).ok, true);
+  for (const phrase of ['menopause diary 3', 'menopause by', 'for menopause']) {
+    assert.equal(assessCandidate(phrase, vocab, profile).ok, false, phrase);
+  }
+  for (const phrase of ['night sweats and menopause', 'hot flash tracker']) {
+    assert.equal(assessCandidate(phrase, vocab, profile).ok, true, phrase);
+  }
 });
 
 test('probes go from the shortest prefix up and stop at six', () => {
