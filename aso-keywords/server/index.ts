@@ -526,7 +526,7 @@ const artworkCache = new Map<string, { url: string; expiresAt: number }>();
 app.post('/api/itunes/artworks', async (req, res) => {
   const ids = (Array.isArray(req.body?.ids) ? req.body.ids : [])
     .map((id: unknown) => String(id).trim())
-    .filter((id) => /^\d+$/.test(id))
+    .filter((id: string) => /^\d+$/.test(id))
     .slice(0, 200);
   const bundles = (Array.isArray(req.body?.bundles) ? req.body.bundles : [])
     .map((bundle: unknown) => String(bundle).trim())
@@ -561,7 +561,7 @@ app.post('/api/itunes/artworks', async (req, res) => {
     }
   }
 
-  const missingBundles = bundles.filter((bundle) => {
+  const missingBundles = bundles.filter((bundle: string) => {
     const cached = artworkCache.get(`${country}:bundle:${bundle}`);
     if (cached && cached.expiresAt > now) {
       result[bundle] = cached.url;
@@ -728,7 +728,7 @@ let snapshotPending = new Set<string>();
 
 function snapshotBroadcast(event: SnapshotEvent) {
   if (event.type === 'start' && event.queue) {
-    snapshotPending = new Set(event.queue);
+    snapshotPending = new Set(event.queue as string[]);
     // Keep the replay buffer small: clients fetch the queue separately.
     event = { ...event, queue: undefined };
   }
@@ -944,7 +944,7 @@ if (entry === realpathSync(fileURLToPath(import.meta.url))) {
   }
 
   const PORT = Number(process.env.PORT) || 5174;
-  app.listen(PORT, serverHost(), () => {
+  app.listen(PORT, serverHost() as string, () => {
     console.log(`ASO Keywords listening on http://localhost:${PORT}`);
     start();
   });

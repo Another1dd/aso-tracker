@@ -70,7 +70,7 @@ export interface PaidObservationPayload {
 }
 
 export interface CreatePaidObservationResult {
-  observation: PaidObservation;
+  value: PaidObservation;
   /** False means a retry returned the original append-only capture. */
   created: boolean;
 }

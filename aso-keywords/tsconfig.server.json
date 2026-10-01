@@ -1,0 +1,16 @@
+{
+  // Type-checks the API server and CLIs. `tsc -b` (npm run build) only covers src/ and vite.config.ts.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["server/**/*.ts", "cli/**/*.ts"]
+}

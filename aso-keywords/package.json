@@ -13,6 +13,7 @@
     "snapshot": "tsx cli/snapshot.ts",
     "validate-metadata-serps": "tsx cli/validate-metadata-serps.ts",
     "keyword-audit": "tsx cli/keyword-audit.ts",
+    "typecheck:server": "tsc -p tsconfig.server.json",
     "build-medscan-deploy": "tsx cli/build-medscan-deploy.ts",
     "migrate-jsonl": "tsx cli/migrate-jsonl.ts",
     "lint": "eslint ."
