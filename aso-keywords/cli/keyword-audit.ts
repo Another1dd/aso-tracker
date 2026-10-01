@@ -3,13 +3,14 @@
 // popularity live there), so it can run on a laptop while the data sits on the always-on Mac.
 //
 //   npm run keyword-audit -w aso-tracker-oss -- --app=flare-hot-flash-tracker \
-//     --metadata=/path/to/ios/fastlane/metadata --base=http://192.168.31.119:5173
+//     --metadata=/path/to/ios/fastlane/metadata --base=http://<studio host>:5173
 //
 // Writes one markdown file per storefront to --out (default ~/.aso-studio/keywords/audits/<app>/<date>).
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { storefrontOf } from '../server/storefronts.js';
+import { normalizeHint } from '../server/text.js';
 
 const LIMITS = { name: 30, subtitle: 30, keywords: 100 } as const;
 type Field = keyof typeof LIMITS;
@@ -26,7 +27,7 @@ function args() {
   return values;
 }
 
-const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+const normalize = normalizeHint;
 const wordsOf = (value: string) => Array.from(normalize(value).matchAll(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu), (match) => match[0]);
 const stem = (word: string) => word.replace(/(es|s)$/u, '');
 
@@ -68,19 +69,23 @@ async function popularityOf(base: string, appId: number, terms: string[]): Promi
 interface DemandItem { term: string; popularity: number | null; band: string; confidence: string; note: string; depth: { status: string; chars?: number } }
 
 /** Popularity plus autocomplete depth for terms; the server queues the probes, so poll until nothing is pending. */
-async function demandFor(base: string, appId: string, storefront: string, terms: string[]): Promise<Map<string, DemandItem>> {
+async function demandFor(base: string, appId: string, storefront: string, allTerms: string[]): Promise<Map<string, DemandItem>> {
   const out = new Map<string, DemandItem>();
   const deadline = Date.now() + 25 * 60_000;
-  while (terms.length && Date.now() < deadline) {
-    const response = await fetch(`${base}/api/apps/${appId}/demand`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storefront, terms, wait_ms: 45_000 }),
-    });
-    if (!response.ok) throw new Error(`demand ${response.status}`);
-    const data = await response.json() as { items: DemandItem[]; pending: number };
-    for (const item of data.items) out.set(item.term, item);
-    if (data.pending === 0) break;
+  // The server takes at most 100 terms per call, so longer lists go in chunks.
+  for (let start = 0; start < allTerms.length; start += 100) {
+    const terms = allTerms.slice(start, start + 100);
+    while (Date.now() < deadline) {
+      const response = await fetch(`${base}/api/apps/${appId}/demand`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storefront, terms, wait_ms: 45_000 }),
+      });
+      if (!response.ok) throw new Error(`demand ${response.status}`);
+      const data = await response.json() as { items: DemandItem[]; pending: number };
+      for (const item of data.items) out.set(item.term, item);
+      if (data.pending === 0) break;
+    }
   }
   return out;
 }

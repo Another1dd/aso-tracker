@@ -119,7 +119,12 @@ async function checkTerms(storefront: string, terms: string[], isBusy: () => boo
 let running: { appId: string; competitorId: string; storefront: string } | null = null;
 let lastError: string | null = null;
 
-async function runCombo(appId: string, watch: WatchRow, storefront: string, isBusy: () => boolean): Promise<void> {
+/** A combo that failed is not retried for a while, otherwise the 10-minute tick would hammer it. */
+const failedAt = new Map<string, number>();
+const RETRY_AFTER_FAILURE_MS = 6 * 3_600_000;
+const comboKey = (appId: string, competitorId: string, storefront: string) => `${appId}|${competitorId}|${storefront}`;
+
+async function runCombo(appId: string, watch: WatchRow, storefront: string, isBusy: () => boolean): Promise<boolean> {
   running = { appId, competitorId: watch.competitor_id, storefront };
   try {
     const country = storefront.split('-')[0].toLowerCase();
@@ -172,8 +177,12 @@ async function runCombo(appId: string, watch: WatchRow, storefront: string, isBu
     db.prepare('INSERT INTO competitor_watch_digest (app_id, competitor_id, storefront, generated_at, payload) VALUES (?, ?, ?, ?, ?) ON CONFLICT(app_id, competitor_id, storefront) DO UPDATE SET generated_at = excluded.generated_at, payload = excluded.payload')
       .run(appId, watch.competitor_id, storefront, Date.now(), JSON.stringify(digest));
     lastError = null;
+    failedAt.delete(comboKey(appId, watch.competitor_id, storefront));
+    return true;
   } catch (error) {
     lastError = error instanceof Error ? error.message : String(error);
+    failedAt.set(comboKey(appId, watch.competitor_id, storefront), Date.now());
+    return false;
   } finally {
     running = null;
   }
@@ -193,20 +202,26 @@ function dueCombos(now: number) {
   return out.sort((a, b) => a.last - b.last);
 }
 
+/** The review window is hours 1 to 4 after the nightly hour began, wrapping past midnight; `since` is when that nightly hour began. */
+export function watchWindow(now: number, nightlyHour: number, enabled: boolean, lastNightlyDay: string | null): { open: boolean; since: number } {
+  const delta = (new Date(now).getHours() - nightlyHour + 24) % 24;
+  if (delta < 1 || delta >= 5) return { open: false, since: 0 };
+  const since = new Date(now - delta * 3_600_000).setMinutes(0, 0, 0);
+  // The nightly run of the day the window belongs to must have finished.
+  if (enabled && lastNightlyDay !== localDay(since)) return { open: false, since };
+  return { open: true, since };
+}
+
 async function tick(isBusy: () => boolean) {
   if (running || isBusy()) return;
   const state = loadScheduleState();
-  const now = Date.now();
-  const start = state.config.hour + 1;
-  const hour = new Date(now).getHours();
-  if (hour < start || hour >= start + 4) return;
-  if (state.config.enabled && state.lastNightlyDay !== localDay(now)) return;
-  const midnight = new Date(now).setHours(0, 0, 0, 0);
-  let done = (db.prepare('SELECT COUNT(*) AS n FROM competitor_watch_digest WHERE generated_at >= ?').get(midnight) as { n: number }).n;
-  for (const next of dueCombos(now)) {
-    if (done >= MAX_COMBOS_PER_DAY || isBusy()) break;
-    await runCombo(next.appId, next.watch, next.storefront, isBusy);
-    done++;
+  const window = watchWindow(Date.now(), state.config.hour, state.config.enabled, state.lastNightlyDay);
+  if (!window.open) return;
+  let done = (db.prepare('SELECT COUNT(*) AS n FROM competitor_watch_digest WHERE generated_at >= ?').get(window.since) as { n: number }).n;
+  for (const next of dueCombos(Date.now())) {
+    if (done >= MAX_COMBOS_PER_DAY || isBusy() || !watchWindow(Date.now(), state.config.hour, state.config.enabled, state.lastNightlyDay).open) break;
+    if (Date.now() - (failedAt.get(comboKey(next.appId, next.watch.competitor_id, next.storefront)) ?? 0) < RETRY_AFTER_FAILURE_MS) continue;
+    if (await runCombo(next.appId, next.watch, next.storefront, isBusy)) done++;
   }
 }
 
