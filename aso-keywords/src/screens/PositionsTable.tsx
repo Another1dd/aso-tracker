@@ -657,9 +657,11 @@ const PositionRow = memo(function PositionRow({
           <span className={`pt-pop ${low ? 'pt-pop-low' : ''}`} {...tipProps(row.keyword, [
             [null, 'Популярность', low ? '≤5 — низкий объём (не ноль)' : `${m.popularity} из 100`],
             [null, 'Источник', 'Apple Ads · рекомендации ключей'],
+            ...(low && m.demandBand !== 'unknown' ? [[null, 'Группа спроса (оценка)', `${m.demandBand}: ${m.demandNote}`] as [string | null, string, string]] : []),
             [m.popularityStatus === 'stale' ? 'var(--ds-warn)' : null, 'Дата', `${fmtDate(m.popularityDay)}${m.popularityStatus === 'stale' ? ' · обновляется' : ''}`],
           ])}>
             <b>{m.popularityLabel ?? m.popularity}</b>
+            {low && m.demandBand !== 'unknown' ? <em className="pt-band">{m.demandBand}</em> : null}
             <i className="pt-bar"><i style={{ width: `${Math.max(4, m.popularity)}%` }} /></i>
           </span>
         );

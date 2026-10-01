@@ -18,6 +18,10 @@ export interface KeywordTableRow {
   popularityLabel: string | null;
   popularityStatus: PopularityStatus;
   popularityDay: string | null;
+  /** A = Apple value above the floor (fact); B–D = estimate from autocomplete depth, low confidence. */
+  demandBand: 'A' | 'B' | 'C' | 'D' | 'unknown';
+  demandConfidence: 'high' | 'medium' | 'low' | 'unknown';
+  demandNote: string;
   difficulty: number | null;
   chance: number | null;
   opportunity: number | null;

@@ -1790,7 +1790,7 @@ function SuggestionsPanel({
               <span className={`idea-gain gain-${idea.level}`} title={idea.inputs.join('\n')}>
                 <span className="idea-gain-head"><em>{IDEA_LEVEL_LABEL[idea.level]}</em><b>{idea.score}</b></span>
                 <i><em style={{ width: `${Math.max(2, Math.min(100, idea.score))}%` }} /></i>
-                <small>спрос {idea.demand.toFixed(2)} × шанс {idea.chance.toFixed(2)} · оценка</small>
+                <small title={idea.demandNote}>спрос {idea.demand.toFixed(2)}{idea.demandBand === 'unknown' ? '' : ` (${idea.demandBand})`} × шанс {idea.chance.toFixed(2)} · оценка</small>
               </span>
             </button>
           ))}

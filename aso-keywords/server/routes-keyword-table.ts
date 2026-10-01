@@ -3,6 +3,7 @@ import { loadApps, loadKeywordLayers, loadKeywords, saveKeywords, updateGlobalKe
 import { db } from './db.js';
 import { keywordDifficulty, opportunity, SPY_FORMULA } from './competitor-spy.js';
 import { asaPopularity } from './suggestions.js';
+import { demandBand, ensureDepth, normalizeHint, suggestDepth } from './autocomplete.js';
 import { clearMatrixCache } from './matrix.js';
 import {
   applyPairs,
@@ -51,6 +52,14 @@ export function registerKeywordTableRoutes(app: Express) {
       const history = keywordHistory(db, appConfig.id, storefront, keywords);
       const tags = loadTags(appConfig.id);
       const notes = tags.notes[storefront] ?? {};
+      // Floor terms get a band from stored autocomplete hints; anything not yet resolved is queued in the background.
+      const depths = new Map<string, Awaited<ReturnType<typeof suggestDepth>>>();
+      for (const keyword of keywords) {
+        const value = popularity?.values.get(tagKey(keyword))?.popularity ?? null;
+        if (value != null && value <= 5) depths.set(keyword, await suggestDepth(normalizeHint(keyword), storefront));
+      }
+      const unresolved = [...depths].filter(([, depth]) => depth.status === 'pending').map(([keyword]) => normalizeHint(keyword));
+      if (unresolved.length) void ensureDepth(storefront, unresolved.slice(0, 80), 0);
       const rows = keywords.map((keyword) => {
         const key = tagKey(keyword);
         const h = history.rows.get(key);
@@ -58,6 +67,7 @@ export function registerKeywordTableRoutes(app: Express) {
         const d = difficulty?.rows.get(key);
         const ourRank = h?.current && h.current > 0 ? h.current : null;
         const popularityValue = pop?.popularity ?? null;
+        const demand = demandBand(popularityValue, depths.get(keyword) ?? { status: 'pending' });
         return {
           keyword,
           current: h?.current ?? null,
@@ -71,6 +81,9 @@ export function registerKeywordTableRoutes(app: Express) {
           popularityLabel: pop?.label ?? null,
           popularityStatus: pop?.status ?? (popularity ? 'pending' : 'unavailable'),
           popularityDay: pop?.day ?? null,
+          demandBand: demand.band,
+          demandConfidence: demand.confidence,
+          demandNote: demand.note,
           difficulty: d?.difficulty ?? null,
           chance: d?.chance ?? null,
           opportunity: opportunity(popularityValue, d?.chance ?? null, ourRank),

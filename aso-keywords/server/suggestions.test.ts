@@ -85,3 +85,15 @@ test('expected gain uses only the inputs it has and explains each one', () => {
   assert.equal(none.score, Math.round(100 * 0.2 * 0.5));
   assert.ok(none.inputs.some((line) => line.includes('данных нет')));
 });
+
+test('floor popularity is split by autocomplete band but never beats a term above the floor', () => {
+  const base = { autocomplete: { index: 3, total: 10, seed: 'x', seeds: 1 } };
+  const above = estimateGain({ ...base, asaPopularity: 6 });
+  const earlyFloor = estimateGain({ ...base, asaPopularity: 5, depthBand: 'B' });
+  const lateFloor = estimateGain({ ...base, asaPopularity: 5, depthBand: 'D' });
+  const plainFloor = estimateGain({ ...base, asaPopularity: 5 });
+  assert.ok(earlyFloor.demand >= lateFloor.demand);
+  assert.ok(earlyFloor.demand <= above.demand);
+  assert.equal(plainFloor.demand, estimateGain({ ...base, asaPopularity: 5, depthBand: 'D' }).demand);
+  assert.ok(earlyFloor.inputs.some((line) => line.includes('группа B')));
+});

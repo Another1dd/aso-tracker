@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { alphabetSoup, anchorProblem, anchorRule, cachedHints, fetchHints, type AnchorRule } from './autocomplete.js';
+import { alphabetSoup, anchorProblem, anchorRule, cachedHints, demandBand, ensureDepth, fetchHints, suggestDepth, type AnchorRule, type DemandBand } from './autocomplete.js';
 import type { GatePriority } from './host-gate.js';
 import { loadApps, loadKeywords, type AppConfig } from './config.js';
 import {
@@ -29,6 +29,10 @@ export interface KeywordIdea {
   /** Why the phrase passed the relevance filter. */
   reason: string;
   cluster: { id: string; label: string };
+  /** A = Apple value above the floor (fact); B–D = floor term ranked by autocomplete depth (estimate, low confidence). */
+  demandBand: DemandBand;
+  demandConfidence: 'high' | 'medium' | 'low' | 'unknown';
+  demandNote: string;
   /** Expected-effect estimate 0–100 (demand × chance). */
   score: number;
   level: GainLevel;
@@ -59,7 +63,7 @@ export interface KeywordSuggestionsResponse {
 
 export const GAIN_FORMULA = [
   'Ожидаемый эффект = спрос × шанс × 100 (оценка, не объём трафика).',
-  'Спрос — среднее доступных сигналов: популярность Apple Ads (0.2 + 0.8·(p−5)/25), позиция в подсказках Apple (1-я = 0.9, 10-я = 0.4), число конкурентов с фразой в названии (0.2 + 0.12·n, максимум 0.8).',
+  'Спрос — среднее доступных сигналов: популярность Apple Ads (0.2 + 0.8·(p−5)/25; на границе ≤5 вместо плоского 0.2 — оценка по автоподсказкам: группа B 0.23, C 0.215, D 0.2, не выше значения для 6), позиция в подсказках Apple (1-я = 0.9, 10-я = 0.4), число конкурентов с фразой в названии (0.2 + 0.12·n, максимум 0.8).',
   'Шанс — среднее доступных сигналов: наша позиция по самой фразе (топ-3 = 0.25, топ-10 = 0.7, ниже = 0.9), наша позиция по исходному ключу (топ-10 = 0.85, топ-30 = 0.65, топ-100 = 0.45, нет = 0.3), медиана оценок топ-5 (<50 = 0.95, <500 = 0.75, <5000 = 0.5, больше = 0.3), фраза = точное название чужого приложения (0.4). Нет данных — 0.5.',
   'Высокий ≥ 40, средний ≥ 20, иначе низкий.',
 ].join('\n');
@@ -261,6 +265,8 @@ export function assessCandidate(phrase: string, vocab: Vocabulary, profile: Rele
 
 export interface GainInputs {
   asaPopularity?: number | null;
+  /** Floor terms only: how early Apple suggests the phrase (estimate). */
+  depthBand?: 'B' | 'C' | 'D' | null;
   autocomplete?: { index: number; total: number; seed: string; seeds: number } | null;
   competitorApps?: number;
   ourRank?: { rank: number | null; depth: number; source: string } | null;
@@ -278,9 +284,12 @@ export function estimateGain(input: GainInputs): { score: number; level: GainLev
   const lines: string[] = [];
   const demandParts: number[] = [];
   if (input.asaPopularity != null) {
-    const value = 0.2 + 0.8 * clamp((input.asaPopularity - 5) / 25);
+    const floorTier = input.asaPopularity <= 5 && input.depthBand ? { B: 0.23, C: 0.215, D: 0.2 }[input.depthBand] : null;
+    const value = floorTier ?? 0.2 + 0.8 * clamp((input.asaPopularity - 5) / 25);
     demandParts.push(value);
-    lines.push(`Спрос: популярность Apple Ads ${input.asaPopularity <= 5 ? '≤5' : input.asaPopularity}/100 → ${fmt(value)}`);
+    lines.push(floorTier != null
+      ? `Спрос: популярность Apple Ads ≤5; подсказки Apple: группа ${input.depthBand} (оценка, низкая уверенность) → ${fmt(value)}`
+      : `Спрос: популярность Apple Ads ${input.asaPopularity <= 5 ? '≤5' : input.asaPopularity}/100 → ${fmt(value)}`);
   }
   if (input.autocomplete) {
     const { index, total, seed, seeds } = input.autocomplete;
@@ -674,6 +683,19 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
   }
 
   const ideas: KeywordIdea[] = [];
+  // Floor-popularity phrases get a band from stored autocomplete hints only; missing probes are queued in the background.
+  const demandByKeyword = new Map<string, ReturnType<typeof demandBand>>();
+  const bandInputs = new Map<string, 'B' | 'C' | 'D'>();
+  const unresolved: string[] = [];
+  for (const candidate of candidates.values()) {
+    const depth = candidate.asaPopularity != null && candidate.asaPopularity <= 5 ? await suggestDepth(candidate.keyword, country) : { status: 'pending' as const };
+    if (candidate.asaPopularity != null && candidate.asaPopularity <= 5 && depth.status === 'pending') unresolved.push(candidate.keyword);
+    const band = demandBand(candidate.asaPopularity ?? null, depth);
+    demandByKeyword.set(candidate.keyword, band);
+    if (band.band === 'B' || band.band === 'C' || band.band === 'D') bandInputs.set(candidate.keyword, band.band);
+  }
+  if (unresolved.length) void ensureDepth(country, unresolved.slice(0, 80), 0);
+
   for (const candidate of candidates.values()) {
     if (!candidate.sources.size) continue;
     const origin: string[] = [];
@@ -721,6 +743,7 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
 
     const gain = estimateGain({
       asaPopularity: candidate.asaPopularity,
+      depthBand: bandInputs.get(candidate.keyword) ?? null,
       autocomplete: candidate.autocomplete,
       competitorApps: candidate.competitorApps.size,
       ourRank,
@@ -739,6 +762,9 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
       origin,
       reason: candidate.assessment.reason,
       cluster: candidate.assessment.cluster,
+      demandBand: demandByKeyword.get(candidate.keyword)!.band,
+      demandConfidence: demandByKeyword.get(candidate.keyword)!.confidence,
+      demandNote: demandByKeyword.get(candidate.keyword)!.note,
       ...gain,
     });
   }
