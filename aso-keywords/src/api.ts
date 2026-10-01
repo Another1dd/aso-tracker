@@ -351,10 +351,6 @@ export interface KeywordIdea {
   /** Why the phrase passed the relevance filter. */
   reason: string;
   cluster: { id: string; label: string };
-  /** A = Apple value above the floor (fact); B–D = estimate from autocomplete depth, low confidence. */
-  demandBand: 'A' | 'B' | 'C' | 'D' | 'unknown';
-  demandConfidence: 'high' | 'medium' | 'low' | 'unknown';
-  demandNote: string;
   /** Expected-effect estimate 0–100 = demand × chance × 100. */
   score: number;
   level: 'high' | 'medium' | 'low';

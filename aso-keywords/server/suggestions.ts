@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { alphabetSoup, anchorProblem, anchorRule, cachedHints, demandBand, ensureDepth, fetchHints, suggestDepth, type AnchorRule, type DemandBand } from './autocomplete.js';
+import { alphabetSoup, anchorProblem, anchorRule, cachedHints, fetchHints, type AnchorRule } from './autocomplete.js';
 import type { GatePriority } from './host-gate.js';
 import { loadApps, loadKeywords, type AppConfig } from './config.js';
 import {
@@ -29,10 +29,6 @@ export interface KeywordIdea {
   /** Why the phrase passed the relevance filter. */
   reason: string;
   cluster: { id: string; label: string };
-  /** A = Apple value above the floor (fact); B–D = floor term ranked by autocomplete depth (estimate, low confidence). */
-  demandBand: DemandBand;
-  demandConfidence: 'high' | 'medium' | 'low' | 'unknown';
-  demandNote: string;
   /** Expected-effect estimate 0–100 (demand × chance). */
   score: number;
   level: GainLevel;
@@ -713,17 +709,6 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
   }
 
   const ideas: KeywordIdea[] = [];
-  // Floor-popularity phrases get a band from stored autocomplete hints only; missing probes are queued in the background.
-  const demandByKeyword = new Map<string, ReturnType<typeof demandBand>>();
-  const unresolved: string[] = [];
-  for (const candidate of candidates.values()) {
-    const depth = candidate.asaPopularity != null && candidate.asaPopularity <= 5 ? await suggestDepth(candidate.keyword, country) : { status: 'pending' as const };
-    if (candidate.asaPopularity != null && candidate.asaPopularity <= 5 && depth.status === 'pending') unresolved.push(candidate.keyword);
-    const band = demandBand(candidate.asaPopularity ?? null, depth);
-    demandByKeyword.set(candidate.keyword, band);
-  }
-  if (unresolved.length) void ensureDepth(country, unresolved.slice(0, 80), 0);
-
   for (const candidate of candidates.values()) {
     if (!candidate.sources.size) continue;
     const origin: string[] = [];
@@ -789,9 +774,6 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
       origin,
       reason: candidate.assessment.reason,
       cluster: candidate.assessment.cluster,
-      demandBand: demandByKeyword.get(candidate.keyword)!.band,
-      demandConfidence: demandByKeyword.get(candidate.keyword)!.confidence,
-      demandNote: demandByKeyword.get(candidate.keyword)!.note,
       ...gain,
     });
   }
