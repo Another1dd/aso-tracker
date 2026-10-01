@@ -63,7 +63,7 @@ export interface KeywordSuggestionsResponse {
 
 export const GAIN_FORMULA = [
   'Ожидаемый эффект = спрос × шанс × 100 (оценка, не объём трафика).',
-  'Спрос — среднее доступных сигналов: популярность Apple Ads (0.2 + 0.8·(p−5)/25; на границе ≤5 вместо плоского 0.2 — оценка по автоподсказкам: группа B 0.23, C 0.215, D 0.2, не выше значения для 6), позиция в подсказках Apple (1-я = 0.9, 10-я = 0.4), число конкурентов с фразой в названии (0.2 + 0.12·n, максимум 0.8).',
+  'Спрос — среднее доступных сигналов: популярность Apple Ads (0.2 + 0.8·(p−5)/25; на границе ≤5 это плоские 0.2, группа B–D показана отдельно и в балл не входит), позиция в подсказках Apple (1-я = 0.9, 10-я = 0.4; в списке «слово + буква» не выше 0.7), число конкурентов с фразой в названии (0.2 + 0.12·n, максимум 0.8).',
   'Шанс — среднее доступных сигналов: наша позиция по самой фразе (топ-3 = 0.25, топ-10 = 0.7, ниже = 0.9), наша позиция по исходному ключу (топ-10 = 0.85, топ-30 = 0.65, топ-100 = 0.45, нет = 0.3), медиана оценок топ-5 (<50 = 0.95, <500 = 0.75, <5000 = 0.5, больше = 0.3), фраза = точное название чужого приложения (0.4). Нет данных — 0.5.',
   'Высокий ≥ 40, средний ≥ 20, иначе низкий.',
 ].join('\n');
@@ -273,9 +273,8 @@ export function assessCandidate(phrase: string, vocab: Vocabulary, profile: Rele
 
 export interface GainInputs {
   asaPopularity?: number | null;
-  /** Floor terms only: how early Apple suggests the phrase (estimate). */
-  depthBand?: 'B' | 'C' | 'D' | null;
-  autocomplete?: { index: number; total: number; seed: string; seeds: number } | null;
+  /** `soup`: the phrase came from the list for "seed + letter", a weaker signal than the list for the seed itself. */
+  autocomplete?: { index: number; total: number; seed: string; seeds: number; soup?: boolean } | null;
   competitorApps?: number;
   ourRank?: { rank: number | null; depth: number; source: string } | null;
   seedRank?: { rank: number | null; seed: string } | null;
@@ -292,18 +291,17 @@ export function estimateGain(input: GainInputs): { score: number; level: GainLev
   const lines: string[] = [];
   const demandParts: number[] = [];
   if (input.asaPopularity != null) {
-    const floorTier = input.asaPopularity <= 5 && input.depthBand ? { B: 0.23, C: 0.215, D: 0.2 }[input.depthBand] : null;
-    const value = floorTier ?? 0.2 + 0.8 * clamp((input.asaPopularity - 5) / 25);
+    const value = 0.2 + 0.8 * clamp((input.asaPopularity - 5) / 25);
     demandParts.push(value);
-    lines.push(floorTier != null
-      ? `Спрос: популярность Apple Ads ≤5; подсказки Apple: группа ${input.depthBand} (оценка, низкая уверенность) → ${fmt(value)}`
-      : `Спрос: популярность Apple Ads ${input.asaPopularity <= 5 ? '≤5' : input.asaPopularity}/100 → ${fmt(value)}`);
+    lines.push(`Спрос: популярность Apple Ads ${input.asaPopularity <= 5 ? '≤5' : input.asaPopularity}/100 → ${fmt(value)}`);
   }
   if (input.autocomplete) {
-    const { index, total, seed, seeds } = input.autocomplete;
-    const value = clamp(0.4 + 0.5 * (1 - Math.min(index, 9) / 9) + 0.05 * (seeds - 1), 0, 0.95);
+    const { index, total, seed, seeds, soup } = input.autocomplete;
+    const value = soup
+      ? clamp(0.4 + 0.3 * (1 - Math.min(index, 9) / 9) + 0.05 * (seeds - 1), 0, 0.7)
+      : clamp(0.4 + 0.5 * (1 - Math.min(index, 9) / 9) + 0.05 * (seeds - 1), 0, 0.95);
     demandParts.push(value);
-    lines.push(`Спрос: подсказка Apple №${index + 1} из ${total} при вводе «${seed}»${seeds > 1 ? ` (и ещё в ${seeds - 1})` : ''} → ${fmt(value)}`);
+    lines.push(`Спрос: подсказка Apple №${index + 1} из ${total} при вводе «${seed}»${seeds > 1 ? ` (и ещё в ${seeds - 1})` : ''}${soup ? ' — список по одной букве, слабый сигнал' : ''} → ${fmt(value)}`);
   }
   if (input.competitorApps) {
     const value = Math.min(0.8, 0.2 + 0.12 * input.competitorApps);
@@ -483,10 +481,23 @@ interface Candidate {
   keyword: string;
   sources: Set<IdeaSource>;
   assessment: Extract<Assessment, { ok: true }>;
-  autocomplete?: { index: number; total: number; seed: string; seeds: number };
+  autocomplete?: { index: number; total: number; seed: string; seeds: number; soup?: boolean };
   competitorApps: Map<string, string>; // app key → title
   competitorKeywords: Map<string, number>; // tracked keyword → apps
   asaPopularity?: number | null;
+}
+
+let backgroundHints = false;
+
+/** Fetches missing hint lists one at a time at tail priority; never more than one such loop, at most 40 lists per call. */
+function fetchInBackground(country: string, prefixes: string[]) {
+  const wanted = [...new Set(prefixes)].slice(0, 40);
+  if (!wanted.length || backgroundHints) return;
+  backgroundHints = true;
+  void (async () => {
+    try { for (const prefix of wanted) await fetchHints(country, prefix); }
+    finally { backgroundHints = false; }
+  })();
 }
 
 const resultCache = new Map<string, { expiresAt: number; value: KeywordSuggestionsResponse }>();
@@ -639,33 +650,44 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
     }))
     .sort((a, b) => (ourRankFor(a) ?? 999) - (ourRankFor(b) ?? 999) || a.length - b.length)
     .slice(0, 12);
-  // Configured topic anchors are seeds too; their alphabet-soup lists are used only when already collected.
-  const anchorSeeds = (anchors.anchors ?? []).map((anchor) => normalized(anchor).replace(/\*/g, '')).filter((anchor) => anchor.length >= 3);
-  const plainSeeds = [...new Set([...seeds, ...anchorSeeds])];
+  // Configured topic anchors are seeds too, but only from stored lists (collected in the background):
+  // an ideas request never waits on Apple for them.
+  const anchorSeeds = [...new Set((anchors.anchors ?? []).map((anchor) => normalized(anchor).replace(/\*/g, '')).filter((anchor) => anchor.length >= 3))].slice(0, 8);
+  const plainSeeds = [...new Set(seeds)];
   const hintGroups = await Promise.all(plainSeeds.map((seed) => appleHints(seed, country)));
-  const groups: Array<{ seed: string; hints: string[] | null }> = plainSeeds.map((seed, index) => ({ seed, hints: hintGroups[index] }));
+  const groups: Array<{ seed: string; prefix: string; hints: string[] | null; soup: boolean }> =
+    plainSeeds.map((seed, index) => ({ seed, prefix: seed, hints: hintGroups[index], soup: false }));
+  const missingAnchorLists: string[] = [];
   for (const seed of anchorSeeds) {
-    for (const prefix of alphabetSoup(seed, country).slice(1)) {
+    for (const prefix of alphabetSoup(seed, country)) {
       const hints = cachedHints(country, prefix);
-      if (hints) groups.push({ seed, hints });
+      if (hints) groups.push({ seed, prefix, hints, soup: prefix !== seed });
+      else missingAnchorLists.push(prefix);
     }
   }
+  fetchInBackground(country, missingAnchorLists);
   let hintCount = 0;
   const seedsCounted = new Set<string>();
   const hintErrors = hintGroups.filter((hints) => hints === null).length;
-  groups.forEach(({ seed, hints }) => {
+  groups.forEach(({ seed, prefix, hints, soup }) => {
     hints?.forEach((hint, index) => {
       hintCount++;
-      if (hint === seed) return;
+      if (hint === prefix) return;
       const candidate = consider(hint);
       if (!candidate) return;
       candidate.sources.add('apple_autocomplete');
-      const counted = seedsCounted.has(`${hint}|${seed}`);
-      seedsCounted.add(`${hint}|${seed}`);
-      if (!candidate.autocomplete) candidate.autocomplete = { index, total: hints.length, seed, seeds: 1 };
+      // Every "seed + letter" list of one anchor counts as a single, weaker seed.
+      const label = soup ? prefix : seed;
+      const countKey = `${hint}|${soup ? `soup:${seed}` : seed}`;
+      const counted = seedsCounted.has(countKey);
+      seedsCounted.add(countKey);
+      const next = { index, total: hints.length, seed: label, soup };
+      if (!candidate.autocomplete) candidate.autocomplete = { ...next, seeds: 1 };
       else {
         if (!counted) candidate.autocomplete.seeds++;
-        if (index < candidate.autocomplete.index) Object.assign(candidate.autocomplete, { index, total: hints.length, seed });
+        const current = candidate.autocomplete;
+        // A list for the seed itself beats any "seed + letter" list; within a kind, the better position wins.
+        if ((current.soup && !soup) || (current.soup === soup && index < current.index)) Object.assign(current, next);
       }
     });
   });
@@ -693,14 +715,12 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
   const ideas: KeywordIdea[] = [];
   // Floor-popularity phrases get a band from stored autocomplete hints only; missing probes are queued in the background.
   const demandByKeyword = new Map<string, ReturnType<typeof demandBand>>();
-  const bandInputs = new Map<string, 'B' | 'C' | 'D'>();
   const unresolved: string[] = [];
   for (const candidate of candidates.values()) {
     const depth = candidate.asaPopularity != null && candidate.asaPopularity <= 5 ? await suggestDepth(candidate.keyword, country) : { status: 'pending' as const };
     if (candidate.asaPopularity != null && candidate.asaPopularity <= 5 && depth.status === 'pending') unresolved.push(candidate.keyword);
     const band = demandBand(candidate.asaPopularity ?? null, depth);
     demandByKeyword.set(candidate.keyword, band);
-    if (band.band === 'B' || band.band === 'C' || band.band === 'D') bandInputs.set(candidate.keyword, band.band);
   }
   if (unresolved.length) void ensureDepth(country, unresolved.slice(0, 80), 0);
 
@@ -751,7 +771,6 @@ async function computeSuggestions(appId: string, locale: string): Promise<Keywor
 
     const gain = estimateGain({
       asaPopularity: candidate.asaPopularity,
-      depthBand: bandInputs.get(candidate.keyword) ?? null,
       autocomplete: candidate.autocomplete,
       competitorApps: candidate.competitorApps.size,
       ourRank,

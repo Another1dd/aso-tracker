@@ -89,14 +89,10 @@ test('expected gain uses only the inputs it has and explains each one', () => {
   assert.ok(none.inputs.some((line) => line.includes('данных нет')));
 });
 
-test('floor popularity is split by autocomplete band but never beats a term above the floor', () => {
-  const base = { autocomplete: { index: 3, total: 10, seed: 'x', seeds: 1 } };
-  const above = estimateGain({ ...base, asaPopularity: 6 });
-  const earlyFloor = estimateGain({ ...base, asaPopularity: 5, depthBand: 'B' });
-  const lateFloor = estimateGain({ ...base, asaPopularity: 5, depthBand: 'D' });
-  const plainFloor = estimateGain({ ...base, asaPopularity: 5 });
-  assert.ok(earlyFloor.demand >= lateFloor.demand);
-  assert.ok(earlyFloor.demand <= above.demand);
-  assert.equal(plainFloor.demand, estimateGain({ ...base, asaPopularity: 5, depthBand: 'D' }).demand);
-  assert.ok(earlyFloor.inputs.some((line) => line.includes('группа B')));
+test('a list for "seed + letter" is a weaker demand signal than the list for the seed itself', () => {
+  const direct = estimateGain({ autocomplete: { index: 0, total: 10, seed: 'menopause', seeds: 1 } });
+  const soup = estimateGain({ autocomplete: { index: 0, total: 10, seed: 'menopause t', seeds: 1, soup: true } });
+  assert.ok(soup.demand < direct.demand);
+  assert.ok(soup.demand <= 0.7);
+  assert.ok(soup.inputs.some((line) => line.includes('слабый сигнал')));
 });

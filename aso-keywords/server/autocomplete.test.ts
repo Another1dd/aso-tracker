@@ -6,7 +6,7 @@ import test from 'node:test';
 
 // autocomplete.ts opens the SQLite store on import; keep tests off the real one.
 process.env.ASO_STUDIO_HOME = mkdtempSync(join(tmpdir(), 'aso-autocomplete-test-'));
-const { anchorProblem, anchorRule, demandBand, matchesAnchor, probesFor, alphabetSoup } = await import('./autocomplete.js');
+const { anchorProblem, anchorRule, demandBand, depthFromProbes, matchesAnchor, probesFor, alphabetSoup } = await import('./autocomplete.js');
 const { assessCandidate, buildVocabulary, genericProfile, tokenize } = await import('./suggestions.js');
 
 const rule = anchorRule(
@@ -69,4 +69,43 @@ test('band A is a fact, B to D are estimates, errors stay unknown', () => {
   assert.equal(demandBand(5, { status: 'never', probes: 3 }).band, 'D');
   assert.equal(demandBand(5, { status: 'error' }).band, 'unknown');
   assert.equal(demandBand(null, { status: 'pending' }).band, 'unknown');
+});
+
+const lists = (map: Record<string, string[]>) => (prefix: string) => (prefix in map ? { state: 'hints' as const, hints: map[prefix] } : { state: 'missing' as const });
+
+test('a failed or missing earlier probe never turns into a shallower hit', async () => {
+  const read = (prefix: string) => prefix === 'menopause'
+    ? { state: 'error' as const }
+    : { state: 'hints' as const, hints: ['menopause tracker'] };
+  assert.deepEqual(await depthFromProbes('menopause tracker', read), { status: 'error' });
+  assert.deepEqual(await depthFromProbes('menopause tracker', lists({ 'menopause t': ['menopause tracker'] })), { status: 'pending' });
+});
+
+test('depth is the first exact hit, or the first longer phrase when no exact hit exists', async () => {
+  const exact = await depthFromProbes('menopause tracker', lists({ menopause: ['menopause'], 'menopause t': ['menopause tracker', 'menopause tips'], 'menopause tr': ['menopause tracker'] }));
+  assert.ok(exact.status === 'hit' && exact.match === 'exact' && exact.chars === 11 && exact.position === 1);
+  const longer = await depthFromProbes('hot flash', lists({ hot: ['hot dog'], 'hot f': ['hot flash tracker'], 'hot fl': ['hot flash tracker'] }));
+  assert.ok(longer.status === 'hit' && longer.match === 'extended' && longer.chars === 5);
+  const exhaustive = await depthFromProbes('hot flash', lists({ hot: ['hot dog'], 'hot f': ['hot flash tracker'], 'hot fl': ['hot flash'] }), { exhaustive: true });
+  assert.ok(exhaustive.status === 'hit' && exhaustive.match === 'exact' && exhaustive.chars === 6);
+  assert.deepEqual(await depthFromProbes('hot flash', lists({ hot: [], 'hot f': [], 'hot fl': [] })), { status: 'never', probes: 3 });
+});
+
+test('probes left out on purpose do not count, and all-left-out is not "never"', async () => {
+  const skipping = (prefix: string) => (prefix === 'menopause' ? { state: 'skip' as const } : { state: 'hints' as const, hints: ['menopause tracker'] });
+  const depth = await depthFromProbes('menopause tracker', skipping);
+  assert.ok(depth.status === 'hit' && depth.chars === 11);
+  assert.deepEqual(await depthFromProbes('hrt', () => ({ state: 'skip' as const })), { status: 'pending' });
+});
+
+test('missing popularity is unknown, and very short phrases can still be early', () => {
+  assert.equal(demandBand(null, { status: 'hit', match: 'exact', chars: 3, ratio: 1, position: 1, total: 5, prefix: 'hrt' }).band, 'unknown');
+  assert.equal(demandBand(5, { status: 'hit', match: 'exact', chars: 3, ratio: 1, position: 1, total: 5, prefix: 'hrt' }).band, 'B');
+});
+
+test('four-word phrases fill all six probes and Cyrillic й is not folded into и', () => {
+  assert.equal(probesFor('hot flash tracker free').length, 6);
+  assert.ok(matchesAnchor('мой дневник', 'мой'));
+  assert.ok(!matchesAnchor('мои дневник', 'мой'));
+  assert.ok(matchesAnchor('Ménopause', 'menopause'));
 });

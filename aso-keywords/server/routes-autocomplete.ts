@@ -1,6 +1,6 @@
 import type { Express } from 'express';
 import { loadApps, loadKeywords, saveApps } from './config.js';
-import { anchorRule, collectSoup, demandBand, ensureDepth, normalizeHint, soupJob, suggestDepth } from './autocomplete.js';
+import { QUEUE_LIMIT, anchorRule, collectSoup, demandBand, ensureDepth, normalizeHint, soupJob, suggestDepth } from './autocomplete.js';
 import { asaPopularity, tokenize } from './suggestions.js';
 
 /** Topic anchors, autocomplete collection and the demand band. `:id` is validated in index.ts. */
@@ -29,7 +29,7 @@ export function registerAutocompleteRoutes(app: Express) {
   });
 
   app.put('/api/apps/:id/anchors', (req, res) => {
-    const body = req.body as { anchors?: unknown; excludeAnchors?: unknown };
+    const body = (req.body ?? {}) as { anchors?: unknown; excludeAnchors?: unknown };
     const anchors = body.anchors === undefined ? undefined : wordLists(body.anchors);
     const excludeAnchors = body.excludeAnchors === undefined ? undefined : wordLists(body.excludeAnchors);
     if (anchors === null || excludeAnchors === null) { res.status(400).json({ error: 'anchors and excludeAnchors are { "us": ["word"], "*": [...] }' }); return; }
@@ -43,7 +43,7 @@ export function registerAutocompleteRoutes(app: Express) {
   });
 
   app.post('/api/apps/:id/autocomplete/collect', (req, res) => {
-    const storefront = String((req.body as { storefront?: string }).storefront ?? '').toLowerCase();
+    const storefront = String(((req.body ?? {}) as { storefront?: string }).storefront ?? '').toLowerCase();
     if (!STOREFRONT.test(storefront)) { res.status(400).json({ error: 'storefront required' }); return; }
     const config = loadApps().find((item) => item.id === req.params.id);
     const seeds = (config?.anchors?.[storefront] ?? config?.anchors?.['*'] ?? []).map((anchor) => normalizeHint(anchor).replace(/\*/g, '')).filter((anchor) => anchor.length >= 3);
@@ -56,7 +56,7 @@ export function registerAutocompleteRoutes(app: Express) {
   app.get('/api/apps/:id/autocomplete', (_req, res) => { res.json(soupJob); });
 
   app.post('/api/apps/:id/demand', async (req, res) => {
-    const body = req.body as { storefront?: string; terms?: unknown; wait_ms?: number; refresh?: boolean };
+    const body = (req.body ?? {}) as { storefront?: string; terms?: unknown; wait_ms?: number; refresh?: boolean };
     const storefront = String(body.storefront ?? '').toLowerCase();
     const config = loadApps().find((item) => item.id === req.params.id);
     if (!config || !STOREFRONT.test(storefront)) { res.status(400).json({ error: 'known app and storefront required' }); return; }
@@ -73,7 +73,7 @@ export function registerAutocompleteRoutes(app: Express) {
         const value = popularity?.values.get(term)?.popularity ?? null;
         items.push({ term, popularity: value, depth, ...demandBand(value, depth) });
       }
-      res.json({ storefront, note: 'Популярность Apple Ads одна на строку для всех витрин; группы B–D — оценка по подсказкам Apple, не объём поиска.', pending, items });
+      res.json({ storefront, note: 'Популярность Apple Ads одна на строку для всех витрин; группы B–D — оценка по подсказкам Apple, не объём поиска.', pending, queueLimit: QUEUE_LIMIT, items });
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });
     }

@@ -59,7 +59,7 @@ export function registerKeywordTableRoutes(app: Express) {
         if (value != null && value <= 5) depths.set(keyword, await suggestDepth(normalizeHint(keyword), storefront));
       }
       const unresolved = [...depths].filter(([, depth]) => depth.status === 'pending').map(([keyword]) => normalizeHint(keyword));
-      if (unresolved.length) void ensureDepth(storefront, unresolved.slice(0, 80), 0);
+      if (unresolved.length) void ensureDepth(storefront, unresolved.slice(0, 20), 0);
       const rows = keywords.map((keyword) => {
         const key = tagKey(keyword);
         const h = history.rows.get(key);
