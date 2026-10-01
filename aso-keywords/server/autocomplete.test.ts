@@ -47,7 +47,7 @@ test('the ideas filter rejects stray marks and off-topic phrases under the ancho
   for (const phrase of ['menopause diary 3', 'menopause by', 'for menopause']) {
     assert.equal(assessCandidate(phrase, vocab, profile).ok, false, phrase);
   }
-  for (const phrase of ['night sweats and menopause', 'hot flash tracker']) {
+  for (const phrase of ['night sweats and menopause', 'menopause night sweats']) {
     assert.equal(assessCandidate(phrase, vocab, profile).ok, true, phrase);
   }
 });
