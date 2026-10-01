@@ -48,7 +48,6 @@
 .pt-bar { flex: 1; height: 4px; border-radius: 999px; background: var(--ds-panel-2); overflow: hidden; }
 .pt-bar i { display: block; height: 100%; border-radius: 999px; background: var(--ds-c1); }
 .pt-pop-low .pt-bar i { background: var(--ds-subtle); }
-.pt-band { margin-left: 4px; font-style: normal; font-size: 10px; color: var(--ds-muted); border: 1px solid var(--ds-subtle); border-radius: 4px; padding: 0 3px; }
 .pt-pending { color: var(--ds-subtle); }
 .pt-num-cell { font-weight: 500; }
 .pt-good { color: var(--ds-good); font-weight: 600; }
