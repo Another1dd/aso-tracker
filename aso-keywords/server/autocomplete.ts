@@ -40,20 +40,22 @@ const errorAt = new Map<string, number>();
 export type HintResult = { status: 'ok'; hints: string[]; cached: boolean } | { status: 'error' };
 
 /** Latest stored hint list for a prefix, or null when none is fresh enough. Errors never count. */
-export function cachedHints(country: string, prefix: string, maxAgeMs = 14 * 24 * HOUR_MS): string[] | null {
-  const row = db.prepare(
-    `SELECT hints_json FROM autocomplete_hints WHERE country = ? AND prefix = ? AND status = 'ok' AND fetched_at > ? ORDER BY fetched_at DESC LIMIT 1`
-  ).get(country, prefix, Date.now() - maxAgeMs) as { hints_json: string } | undefined;
+export function cachedHints(country: string, prefix: string, maxAgeMs = 14 * 24 * HOUR_MS, sameDay = false): string[] | null {
+  const row = (sameDay
+    ? db.prepare(`SELECT hints_json FROM autocomplete_hints WHERE country = ? AND prefix = ? AND status = 'ok' AND day = ? LIMIT 1`).get(country, prefix, today())
+    : db.prepare(
+      `SELECT hints_json FROM autocomplete_hints WHERE country = ? AND prefix = ? AND status = 'ok' AND fetched_at > ? ORDER BY fetched_at DESC LIMIT 1`
+    ).get(country, prefix, Date.now() - maxAgeMs)) as { hints_json: string } | undefined;
   return row ? (JSON.parse(row.hints_json) as string[]) : null;
 }
 
 export async function fetchHints(
   country: string,
   rawPrefix: string,
-  options: { priority?: GatePriority; maxAgeMs?: number } = {},
+  options: { priority?: GatePriority; maxAgeMs?: number; sameDay?: boolean } = {},
 ): Promise<HintResult> {
   const prefix = normalizeHint(rawPrefix);
-  const cached = cachedHints(country, prefix, options.maxAgeMs);
+  const cached = cachedHints(country, prefix, options.maxAgeMs, options.sameDay);
   if (cached) return { status: 'ok', hints: cached, cached: true };
 
   const storefront = storeFrontHeader(country) ?? storeFrontHeader('us')!;
@@ -117,28 +119,35 @@ export type Depth =
   | { status: 'error' };
 
 /** Walks the probes in order using stored hints only (`fetch: true` fills the gaps, stopping at the first hit). */
-export async function suggestDepth(rawPhrase: string, country: string, options: { fetch?: boolean } = {}): Promise<Depth> {
+export async function suggestDepth(rawPhrase: string, country: string, options: { fetch?: boolean; refresh?: boolean } = {}): Promise<Depth> {
   const phrase = normalizeHint(rawPhrase);
   const probes = probesFor(phrase);
   let sawError = false;
   // A hint that only starts with the phrase ("hot flash tracker" for "hot flash") is weaker evidence: keep looking for an exact one.
   let extended: Depth | null = null;
+  // refresh: fetch every probe once today (a second dated sample for the stability check), no early stop.
+  let exact: Depth | null = null;
   for (const prefix of probes) {
-    let hints = cachedHints(country, prefix);
+    let hints = options.refresh ? cachedHints(country, prefix, 0, true) : cachedHints(country, prefix);
     if (!hints) {
       const failedRecently = Date.now() - (errorAt.get(`${country}|${prefix}`) ?? 0) < ERROR_MEMORY_MS;
       if (failedRecently) { sawError = true; continue; }
       if (!options.fetch) return { status: 'pending' };
-      const result = await fetchHints(country, prefix);
+      const result = await fetchHints(country, prefix, { sameDay: options.refresh });
       if (result.status === 'error') { sawError = true; continue; }
       hints = result.hints;
     }
     const ratio = Math.round((prefix.length / phrase.length) * 100) / 100;
     const index = hints.indexOf(phrase);
-    if (index >= 0) return { status: 'hit', match: 'exact', chars: prefix.length, ratio, position: index + 1, total: hints.length, prefix };
+    if (index >= 0) {
+      const hit: Depth = { status: 'hit', match: 'exact', chars: prefix.length, ratio, position: index + 1, total: hints.length, prefix };
+      if (!options.refresh) return hit;
+      exact ??= hit;
+    }
     const longer = hints.findIndex((hint) => hint.startsWith(`${phrase} `));
     if (longer >= 0 && !extended) extended = { status: 'hit', match: 'extended', chars: prefix.length, ratio, position: longer + 1, total: hints.length, prefix };
   }
+  if (exact) return exact;
   if (extended) return extended;
   return sawError ? { status: 'error' } : { status: 'never', probes: probes.length };
 }
@@ -160,20 +169,21 @@ export function demandBand(popularity: number | null, depth: Depth): { band: Dem
 
 // --- Background queue ---------------------------------------------------------------------
 
-const queue: Array<{ country: string; term: string }> = [];
+const queue: Array<{ country: string; term: string; refresh: boolean }> = [];
 let draining: Promise<void> | null = null;
 
 function drain() {
   draining ??= (async () => {
-    for (let item = queue.shift(); item; item = queue.shift()) await suggestDepth(item.term, item.country, { fetch: true });
+    for (let item = queue.shift(); item; item = queue.shift()) await suggestDepth(item.term, item.country, { fetch: true, refresh: item.refresh });
   })().finally(() => { draining = null; });
   return draining;
 }
 
 /** Queues terms whose depth is not resolvable from stored hints and waits up to `waitMs` for the queue. */
-export async function ensureDepth(country: string, terms: string[], waitMs: number): Promise<number> {
+export async function ensureDepth(country: string, terms: string[], waitMs: number, refresh = false): Promise<number> {
   for (const term of terms) {
-    if ((await suggestDepth(term, country)).status === 'pending' && !queue.some((item) => item.country === country && item.term === term)) queue.push({ country, term });
+    const unresolved = refresh ? probesFor(term).some((prefix) => !cachedHints(country, prefix, 0, true)) : (await suggestDepth(term, country)).status === 'pending';
+    if (unresolved && !queue.some((item) => item.country === country && item.term === term)) queue.push({ country, term, refresh });
   }
   if (queue.length) await Promise.race([drain(), new Promise((resolve) => setTimeout(resolve, waitMs))]);
   return queue.length + (draining ? 1 : 0);
@@ -187,7 +197,7 @@ export async function collectSoup(appId: string, country: string, seeds: string[
   soupJob.running = job;
   try {
     for (const prefix of prefixes) {
-      const result = await fetchHints(country, prefix);
+      const result = await fetchHints(country, prefix, { sameDay: true });
       job.done++;
       if (result.status === 'error') job.errors++;
     }

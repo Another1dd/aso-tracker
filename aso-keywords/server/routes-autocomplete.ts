@@ -56,15 +56,16 @@ export function registerAutocompleteRoutes(app: Express) {
   app.get('/api/apps/:id/autocomplete', (_req, res) => { res.json(soupJob); });
 
   app.post('/api/apps/:id/demand', async (req, res) => {
-    const body = req.body as { storefront?: string; terms?: unknown; wait_ms?: number };
+    const body = req.body as { storefront?: string; terms?: unknown; wait_ms?: number; refresh?: boolean };
     const storefront = String(body.storefront ?? '').toLowerCase();
     const config = loadApps().find((item) => item.id === req.params.id);
     if (!config || !STOREFRONT.test(storefront)) { res.status(400).json({ error: 'known app and storefront required' }); return; }
     const terms = [...new Set((Array.isArray(body.terms) ? body.terms : []).map((term) => normalizeHint(String(term))).filter(Boolean))].slice(0, 100);
     const waitMs = Math.min(Math.max(Number(body.wait_ms) || 0, 0), 60_000);
     try {
-      const [popularity] = await Promise.all([asaPopularity(config, storefront, terms, waitMs), ensureDepth(storefront, terms, waitMs)]);
-      let pending = popularity?.pending ?? 0;
+      const refresh = body.refresh === true;
+      const [popularity, queued] = await Promise.all([asaPopularity(config, storefront, terms, waitMs), ensureDepth(storefront, terms, waitMs, refresh)]);
+      let pending = (popularity?.pending ?? 0) + (refresh ? queued : 0);
       const items = [];
       for (const term of terms) {
         const depth = await suggestDepth(term, storefront);

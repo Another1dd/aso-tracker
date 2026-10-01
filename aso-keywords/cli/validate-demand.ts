@@ -5,6 +5,7 @@
 //   npx tsx cli/validate-demand.ts [--base=http://127.0.0.1:5173] [--db=../asa-ads/data/asa-ads.db] [--country=us]
 //   npx tsx cli/validate-demand.ts --stability=2026-09-30,2026-10-01   (second run, offline over stored hints)
 //
+//   npx tsx cli/validate-demand.ts --refresh=100   (refetch today's hints for a fixed sample, for the stability check)
 // Rules and thresholds: docs/plans/keyword-demand-and-audit.md (P3). Prints a verdict, writes nothing.
 import Database from 'better-sqlite3';
 import { join, resolve } from 'node:path';
@@ -143,6 +144,32 @@ async function main() {
   }
 
   const base = (options.base ?? 'http://127.0.0.1:5173').replace(/\/$/, '');
+  if (options.refresh) {
+    // Second dated sample for the stability check: refetch every probe of a fixed sample today (no early stop).
+    const size = Number(options.refresh) || 100;
+    const sampleDb = new Database(resolve(options.db ?? '../asa-ads/data/asa-ads.db'), { readonly: true, fileMustExist: true });
+    const all = sampleDb.prepare(`SELECT DISTINCT term, popularity FROM asa_keyword_popularity WHERE storefront = ? AND popularity IS NOT NULL`).all(country.toUpperCase()) as Array<{ term: string; popularity: number }>;
+    const hash = (term: string) => [...term].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+    const pick = (list: typeof all) => list.sort((a, b) => hash(a.term) - hash(b.term)).slice(0, Math.ceil(size / 2)).map((row) => row.term);
+    const sample = [...pick(all.filter((row) => row.popularity > 5)), ...pick(all.filter((row) => row.popularity <= 5))];
+    const toolApps = await (await fetch(`${base}/api/apps`)).json() as Array<{ id: string }>;
+    const deadline = Date.now() + 90 * 60_000;
+    for (let i = 0; i < sample.length && Date.now() < deadline; i += 25) {
+      for (;;) {
+        const response = await fetch(`${base}/api/apps/${toolApps[0].id}/demand`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storefront: country, terms: sample.slice(i, i + 25), wait_ms: 50_000, refresh: true }),
+        });
+        if (!response.ok) throw new Error(`demand ${response.status}`);
+        if ((await response.json() as { pending: number }).pending === 0) break;
+        if (Date.now() > deadline) break;
+      }
+      console.error(`refreshed ${Math.min(i + 25, sample.length)}/${sample.length}`);
+    }
+    console.log(`Refreshed ${sample.length} sampled terms for today; now run with --stability=<earlier day>,<today>.`);
+    return;
+  }
   const adsDb = new Database(resolve(options.db ?? '../asa-ads/data/asa-ads.db'), { readonly: true, fileMustExist: true });
   const rows = adsDb.prepare(
     `SELECT p.term, p.popularity, p.app_id AS appId FROM asa_keyword_popularity p
